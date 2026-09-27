@@ -316,22 +316,27 @@ function addLggControls(
   const summary = document.createElement("summary");
   summary.textContent = "リフト・ガンマ・ゲイン";
   details.appendChild(summary);
-  const mq = window.matchMedia("(max-width: 640px)");
-  details.open = lggDetailsOpen ?? !mq.matches;
-  // 自動追従によるopen変更でもtoggleは発火するので、記録をスキップする目印
-  let autoToggle = false;
+  // openをJSから変更してもtoggleは発火するため、自動変更分は記録しない目印。
+  // 初期代入も発火するので、代入経路をすべてsetAutoに通す。
+  let suppressToggle = false;
   details.addEventListener("toggle", () => {
-    if (autoToggle) {
-      autoToggle = false;
+    if (suppressToggle) {
+      suppressToggle = false;
       return;
     }
     lggDetailsOpen = details.open;
   });
+  const setAuto = (open: boolean) => {
+    if (details.open === open) return;
+    suppressToggle = true;
+    details.open = open;
+  };
+  const mq = window.matchMedia("(max-width: 640px)");
+  setAuto(lggDetailsOpen ?? !mq.matches);
   // ユーザーが一度も開閉していない間は、画面幅が640pxを跨いだら既定に追従する
   mq.addEventListener("change", () => {
     if (lggDetailsOpen !== null) return;
-    autoToggle = true;
-    details.open = !mq.matches;
+    setAuto(!mq.matches);
   });
   container.appendChild(details);
 
