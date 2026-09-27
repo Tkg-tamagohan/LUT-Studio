@@ -249,15 +249,13 @@ describe("ADJ-08 色温度は暖色方向で赤を増し青を減らす", () => 
   });
 });
 
-describe("ISO-01 分離モード（部分色残し）", () => {
+describe("ISO-01 分離（部分色残し）", () => {
   const isolateRed = () => {
     const adj = neutralAdjustments();
     adj.isolation = {
-      mode: "isolate",
-      hue: 0,
-      range: 30,
-      feather: 10,
+      enabled: true,
       strength: 1,
+      targets: [{ hue: 0, range: 30, feather: 10 }],
     };
     return adj;
   };
@@ -290,7 +288,7 @@ describe("ISO-01 分離モード（部分色残し）", () => {
 
   it("色相環の0/360境界をまたいで選択できる", () => {
     const adj = isolateRed();
-    adj.isolation.hue = 350;
+    adj.isolation.targets[0].hue = 350;
     const out = new Float32Array(3);
     applyAdjustments(1, 0, 0, adj, out);
     expect(out[0]).toBeCloseTo(1, 5);
@@ -298,38 +296,43 @@ describe("ISO-01 分離モード（部分色残し）", () => {
   });
 });
 
-describe("ISO-02 範囲補正モード", () => {
-  it("範囲内の彩度だけが強調される", () => {
+describe("ISO-02 複数色相の選択", () => {
+  it("離れた2色相を同時に残せる", () => {
     const adj = neutralAdjustments();
     adj.isolation = {
-      mode: "select",
-      hue: 0,
-      range: 30,
-      feather: 10,
+      enabled: true,
       strength: 1,
-    };
-    const neutral = new Float32Array(3);
-    applyAdjustments(0.5, 0.4, 0.4, neutralAdjustments(), neutral);
-    const out = new Float32Array(3);
-    applyAdjustments(0.5, 0.4, 0.4, adj, out);
-    expect(out[0] - out[1]).toBeGreaterThan(neutral[0] - neutral[1]);
-  });
-});
-
-describe("ISO-03 マスク表示モード", () => {
-  it("範囲内は白・範囲外は黒のグレースケールで出力される", () => {
-    const adj = neutralAdjustments();
-    adj.isolation = {
-      mode: "mask",
-      hue: 0,
-      range: 30,
-      feather: 10,
-      strength: 1,
+      targets: [
+        { hue: 0, range: 30, feather: 10 },
+        { hue: 240, range: 30, feather: 10 },
+      ],
     };
     const out = new Float32Array(3);
+    // 赤と青は残る
     applyAdjustments(1, 0, 0, adj, out);
     expect(out[0]).toBeCloseTo(1, 5);
     applyAdjustments(0, 0, 1, adj, out);
+    expect(out[2]).toBeCloseTo(1, 5);
+    // 緑（どちらの範囲にも入らない）は脱色される
+    applyAdjustments(0, 1, 0, adj, out);
+    expect(out[0]).toBeCloseTo(out[1], 5);
+    expect(out[1]).toBeCloseTo(out[2], 5);
+  });
+});
+
+describe("ISO-03 選択範囲のマスクプレビュー", () => {
+  it("範囲内は白・範囲外は黒のグレースケールを返す", () => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      enabled: true,
+      strength: 1,
+      targets: [{ hue: 0, range: 30, feather: 10 }],
+    };
+    const maskTransform = compileAdjustments(adj, { maskPreview: true });
+    const out = new Float32Array(3);
+    maskTransform(1, 0, 0, out);
+    expect(out[0]).toBeCloseTo(1, 5);
+    maskTransform(0, 0, 1, out);
     expect(out[0]).toBeCloseTo(0, 5);
     expect(out[1]).toBeCloseTo(0, 5);
     expect(out[2]).toBeCloseTo(0, 5);

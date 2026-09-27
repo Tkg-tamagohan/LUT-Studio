@@ -10,6 +10,19 @@
     <header id="app-header">
       <h1>LUT-Studio</h1>
       <p id="status">画像を読み込んでください</p>
+      <label class="header-check">
+        <input id="mask-preview" type="checkbox" />
+        選択範囲を表示
+      </label>
+      <label class="header-select">
+        テーマ
+        <select id="theme-select">
+          <option value="dark">ダーク</option>
+          <option value="gray">ライトグレー</option>
+          <option value="black">ブラック</option>
+          <option value="white">ホワイト</option>
+        </select>
+      </label>
     </header>
     <div id="main">
       <section id="stage">

@@ -40,25 +40,27 @@ export const IDENTITY_CURVE: CurvePoint[] = [
   { x: 1, y: 1 },
 ];
 
-/**
- * 色相アイソレーションのモード（仕様決定K）。
- * - isolate: 指定色相範囲だけ彩色を残し、範囲外を脱色する（部分色残し）
- * - select:  指定色相範囲の内側だけ彩度を強調する（範囲補正。仮実装）
- * - mask:    選択範囲をグレースケールで可視化する（設定確認用。仮実装）
- */
-export type IsolationMode = "off" | "isolate" | "select" | "mask";
-
-/** 色相選択の設定。色相環上の中心色相と、範囲・端のぼかしを度数で指定する。 */
-export interface IsolationParams {
-  mode: IsolationMode;
+/** 色相アイソレーションで彩色を残す選択対象（仕様決定K）。 */
+export interface IsolationTarget {
   /** 選択の中心となる色相。0〜360度。 */
   hue: number;
   /** 選択範囲の半幅。0〜180度。 */
   range: number;
   /** 選択範囲の端を滑らかにする幅。0〜90度。 */
   feather: number;
-  /** 効果の強さ。0〜1。mask モードでは未使用。 */
+}
+
+/**
+ * 色相アイソレーションの設定。選択した色相範囲（複数可）の彩色だけを残し、
+ * それ以外を輝度へ脱色する「部分色残し」。
+ */
+export interface IsolationParams {
+  /** 無効時は入力をそのまま通す。 */
+  enabled: boolean;
+  /** 範囲外の脱色量。0〜1。1で完全なモノクロ化。 */
   strength: number;
+  /** 残したい色相の選択一覧。複数登録できる（肌色＋別の特定色など）。 */
+  targets: IsolationTarget[];
 }
 
 export function neutralAdjustments(): AdjustmentSet {
@@ -75,7 +77,11 @@ export function neutralAdjustments(): AdjustmentSet {
     lift: [0, 0, 0],
     gamma: [1, 1, 1],
     gain: [1, 1, 1],
-    isolation: { mode: "off", hue: 0, range: 30, feather: 15, strength: 1 },
+    isolation: {
+      enabled: false,
+      strength: 1,
+      targets: [{ hue: 0, range: 30, feather: 15 }],
+    },
   };
 }
 
@@ -167,7 +173,18 @@ function lookupCurve(table: CurveTable | null, x: number): number {
  * 適用順は 露出 → 色温度 → コントラスト → 彩度 → 色相 → カーブ →
  * リフト/ガンマ/ゲイン とし、最後に0〜1へ丸める。
  */
-export function compileAdjustments(adj: AdjustmentSet): ColorTransform {
+export interface CompileOptions {
+  /**
+   * true のとき、アイソレーションの選択範囲（マスク）をグレースケールで出力する。
+   * プレビュー上で選択範囲を確認する用途で、書き出しLUTには使わない。
+   */
+  maskPreview?: boolean;
+}
+
+export function compileAdjustments(
+  adj: AdjustmentSet,
+  opts?: CompileOptions,
+): ColorTransform {
   const exp = Math.pow(2, adj.exposure);
   const tempShift = adj.temperature * TEMPERATURE_SHIFT;
   const contrastFactor = 1 + adj.contrast;
@@ -213,28 +230,27 @@ export function compileAdjustments(adj: AdjustmentSet): ColorTransform {
     }
 
     const iso = adj.isolation;
-    if (iso.mode !== "off") {
+    if (iso.enabled) {
       const h = hueDegrees(r, g, b);
-      const outer = iso.range + Math.max(iso.feather, 0.001);
-      const mask = 1 - smoothstep(iso.range, outer, hueDistance(h, iso.hue));
-      const lumaI = r * LUMA_R + g * LUMA_G + b * LUMA_B;
-      if (iso.mode === "isolate") {
-        // mask=1 は原色、mask=0 は strength に応じて脱色
-        const keep = mask + (1 - mask) * (1 - iso.strength);
-        r = lumaI + (r - lumaI) * keep;
-        g = lumaI + (g - lumaI) * keep;
-        b = lumaI + (b - lumaI) * keep;
-      } else if (iso.mode === "select") {
-        const boost = 1 + iso.strength * 2 * mask;
-        r = lumaI + (r - lumaI) * boost;
-        g = lumaI + (g - lumaI) * boost;
-        b = lumaI + (b - lumaI) * boost;
-      } else {
-        // mask: 選択度をグレースケールで出力
-        r = mask;
-        g = mask;
-        b = mask;
+      // 複数の選択対象のうち最も強く選択される度合いを採用する
+      let mask = 0;
+      for (const t of iso.targets) {
+        const outer = t.range + Math.max(t.feather, 0.001);
+        const m = 1 - smoothstep(t.range, outer, hueDistance(h, t.hue));
+        if (m > mask) mask = m;
       }
+      if (opts?.maskPreview) {
+        out[0] = mask;
+        out[1] = mask;
+        out[2] = mask;
+        return;
+      }
+      const lumaI = r * LUMA_R + g * LUMA_G + b * LUMA_B;
+      // mask=1 は原色、mask=0 は strength に応じて脱色
+      const keep = mask + (1 - mask) * (1 - iso.strength);
+      r = lumaI + (r - lumaI) * keep;
+      g = lumaI + (g - lumaI) * keep;
+      b = lumaI + (b - lumaI) * keep;
     }
 
     r = lookupCurve(tableR, lookupCurve(tableMaster, r));

@@ -27,6 +27,7 @@ const status = document.getElementById("status")!;
 const entries = new Map<string, { entry: ImageEntry; renderer: PreviewRenderer | null }>();
 
 let bakeScheduled = false;
+let maskPreview = false;
 
 /** スライダ変更を受けてLUTを再焼き付けし、全画像を再描画する。連続入力はrAFでまとめる。 */
 function scheduleRebake(): void {
@@ -34,7 +35,10 @@ function scheduleRebake(): void {
   bakeScheduled = true;
   requestAnimationFrame(() => {
     bakeScheduled = false;
-    lut = bakeLut(PREVIEW_LUT_SIZE, compileAdjustments(adjustments));
+    lut = bakeLut(
+      PREVIEW_LUT_SIZE,
+      compileAdjustments(adjustments, { maskPreview }),
+    );
     for (const { renderer } of entries.values()) {
       renderer?.setLut(lut);
       renderer?.render();
@@ -104,6 +108,30 @@ dropzone.addEventListener("drop", (e) => {
 });
 
 window.addEventListener("resize", renderAll);
+
+// アイソレーションの選択範囲をプレビュー上で可視化する（書き出しLUTには含めない）
+const maskPreviewBox = document.getElementById(
+  "mask-preview",
+) as HTMLInputElement;
+maskPreviewBox.addEventListener("change", () => {
+  maskPreview = maskPreviewBox.checked;
+  scheduleRebake();
+});
+
+// テーマ切替（選択はlocalStorageへ保存）
+const THEME_KEY = "lut-studio:theme";
+const themeSelect = document.getElementById(
+  "theme-select",
+) as HTMLSelectElement;
+const savedTheme = localStorage.getItem(THEME_KEY);
+if (savedTheme) {
+  document.documentElement.dataset.theme = savedTheme;
+  themeSelect.value = savedTheme;
+}
+themeSelect.addEventListener("change", () => {
+  document.documentElement.dataset.theme = themeSelect.value;
+  localStorage.setItem(THEME_KEY, themeSelect.value);
+});
 
 const panel = document.getElementById("panel")!;
 createAdjustmentPanel(panel, adjustments, scheduleRebake);
