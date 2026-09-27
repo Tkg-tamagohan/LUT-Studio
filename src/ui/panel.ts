@@ -1,9 +1,11 @@
 import {
   hueDegrees,
+  IDENTITY_CURVE,
   isolationMaskAt,
   type AdjustmentSet,
   type IsolationTarget,
 } from "../engine";
+import { createCurveEditor } from "./curve-editor";
 
 /** 画像上のクリックで色相を拾いたい時に呼ぶ。結果は色相（度）で返る。 */
 type PickFromImage = (onPicked: (hueDeg: number) => void) => void;
@@ -273,6 +275,46 @@ function addIsolationControls(
   container.appendChild(add);
 }
 
+/** リフト・ガンマ・ゲイン。チャネル別に小さいスライダを並べる。 */
+function addLggControls(
+  container: HTMLElement,
+  adj: AdjustmentSet,
+  onChange: () => void,
+): void {
+  const heading = document.createElement("h3");
+  heading.textContent = "リフト・ガンマ・ゲイン";
+  container.appendChild(heading);
+
+  const groups: {
+    key: "lift" | "gamma" | "gain";
+    label: string;
+    min: number;
+    max: number;
+    step: number;
+  }[] = [
+    { key: "lift", label: "リフト", min: -1, max: 1, step: 0.01 },
+    { key: "gamma", label: "ガンマ", min: 0.2, max: 4, step: 0.01 },
+    { key: "gain", label: "ゲイン", min: 0.2, max: 4, step: 0.01 },
+  ];
+  const CHANNEL_LABELS = ["R", "G", "B"] as const;
+
+  for (const group of groups) {
+    for (let ch = 0; ch < 3; ch++) {
+      container.appendChild(
+        makeSlider(
+          `${group.label} ${CHANNEL_LABELS[ch]}`,
+          group.min,
+          group.max,
+          group.step,
+          () => adj[group.key][ch],
+          (v) => (adj[group.key][ch] = v),
+          onChange,
+        ),
+      );
+    }
+  }
+}
+
 export function createAdjustmentPanel(
   container: HTMLElement,
   adj: AdjustmentSet,
@@ -302,6 +344,10 @@ export function createAdjustmentPanel(
     );
   }
 
+  addLggControls(container, adj, onChange);
+
+  createCurveEditor(container, adj, onChange);
+
   addIsolationControls(container, adj, onChange, rebuildPanel, onPickStart);
 
   const reset = document.createElement("button");
@@ -309,6 +355,13 @@ export function createAdjustmentPanel(
   reset.textContent = "リセット";
   reset.addEventListener("click", () => {
     for (const spec of BASIC_SLIDERS) adj[spec.key] = 0;
+    adj.curveMaster = IDENTITY_CURVE.map((p) => ({ ...p }));
+    adj.curveR = IDENTITY_CURVE.map((p) => ({ ...p }));
+    adj.curveG = IDENTITY_CURVE.map((p) => ({ ...p }));
+    adj.curveB = IDENTITY_CURVE.map((p) => ({ ...p }));
+    adj.lift = [0, 0, 0];
+    adj.gamma = [1, 1, 1];
+    adj.gain = [1, 1, 1];
     adj.isolation = {
       enabled: false,
       strength: 1,

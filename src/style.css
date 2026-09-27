@@ -279,3 +279,39 @@ button:disabled {
   opacity: 0.45;
   cursor: default;
 }
+
+/* RGBカーブエディタ */
+.curve-channels {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.curve-channels button {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.55rem;
+}
+
+.curve-channels button.active {
+  border-color: var(--fg);
+  color: var(--fg);
+}
+
+.curve-editor {
+  display: block;
+  border-radius: 4px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.curve-hint,
+.hint {
+  font-size: 0.72rem;
+  color: var(--fg-dim);
+  margin: 0.3rem 0 0.7rem;
+}
+
+.curve-reset {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+}
