@@ -175,23 +175,27 @@ themeSelect.addEventListener("change", () => {
   localStorage.setItem(THEME_KEY, themeSelect.value);
 });
 
-// プレビュー画像の表示サイズ（右ペインは固定幅のまま、タイル幅を変える）
+// プレビュー画像の表示サイズ。右ペインは固定幅のまま、
+// タイル幅をステージ幅に対する割合（%）で変える。画面サイズ変更にも追従する。
 const TILE_KEY = "lut-studio:tile-size";
 const tileSize = document.getElementById("tile-size") as HTMLInputElement;
-const applyTileSize = (px: number) => {
+const stage = document.getElementById("stage")!;
+const applyTileSize = (pct: number) => {
+  const px = Math.round((stage.clientWidth * pct) / 100);
   document.documentElement.style.setProperty("--tile", `${px}px`);
   renderAll();
 };
 const savedTile = Number(localStorage.getItem(TILE_KEY));
-if (savedTile >= 160 && savedTile <= 960) {
+if (savedTile >= 15 && savedTile <= 90) {
   tileSize.value = String(savedTile);
-  applyTileSize(savedTile);
 }
+applyTileSize(Number(tileSize.value));
 tileSize.addEventListener("input", () => {
-  const px = Number(tileSize.value);
-  applyTileSize(px);
-  localStorage.setItem(TILE_KEY, String(px));
+  const pct = Number(tileSize.value);
+  applyTileSize(pct);
+  localStorage.setItem(TILE_KEY, String(pct));
 });
+window.addEventListener("resize", () => applyTileSize(Number(tileSize.value)));
 
 const panel = document.getElementById("panel")!;
 createAdjustmentPanel(panel, adjustments, scheduleRebake, requestHuePick);
