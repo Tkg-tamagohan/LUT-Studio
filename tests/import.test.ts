@@ -249,6 +249,15 @@ function quantized(v: number): number {
   return Math.round(v * 255) / 255;
 }
 
+/** 読み戻したLUTと元LUTの最大差分。量子化後の期待値と比較する。 */
+function quantizedDiffMax(actual: LutData, expected: LutData): number {
+  let max = 0;
+  for (let i = 0; i < actual.data.length; i++) {
+    max = Math.max(max, Math.abs(actual.data[i] - quantized(expected.data[i])));
+  }
+  return max;
+}
+
 describe("IMP-14: HaldCLUT書き出しと往復一致する", () => {
   it("非対称LUT(size=64)が量子化を経て一致する", () => {
     const original = permutedLut(64);
@@ -256,11 +265,7 @@ describe("IMP-14: HaldCLUT書き出しと往復一致する", () => {
     const lut = imageToLut(img, "hald");
     expect(lut.size).toBe(64);
     // Float32格納による表現誤差（~1e-7）までを一致とみなす
-    for (let i = 0; i < lut.data.length; i++) {
-      expect(Math.abs(lut.data[i] - quantized(original.data[i]))).toBeLessThan(
-        1e-7,
-      );
-    }
+    expect(quantizedDiffMax(lut, original)).toBeLessThan(1e-7);
   });
 });
 
@@ -270,11 +275,7 @@ describe("IMP-15: ReShade書き出しと往復一致する", () => {
     const img = lutToReShade(original);
     const lut = imageToLut(img, "reshade");
     expect(lut.size).toBe(64);
-    for (let i = 0; i < lut.data.length; i++) {
-      expect(Math.abs(lut.data[i] - quantized(original.data[i]))).toBeLessThan(
-        1e-7,
-      );
-    }
+    expect(quantizedDiffMax(lut, original)).toBeLessThan(1e-7);
   });
 });
 
