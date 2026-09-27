@@ -108,8 +108,22 @@ function addImage(entry: ImageEntry): void {
     renderer.setImage(entry.bitmap);
     renderer.setLut(lut);
     renderer.render();
+    // 原画比較：キャンバスを押している間はLUTを通さず原画を表示する
+    // （スポイトの色相拾いモード中は比較を優先させない）
+    canvas.addEventListener("pointerdown", (e) => {
+      if (pickCallback || e.button !== 0) return;
+      renderer.setBypass(true);
+      renderer.render();
+    });
+    const release = () => {
+      renderer.setBypass(false);
+      renderer.render();
+    };
+    canvas.addEventListener("pointerup", release);
+    canvas.addEventListener("pointercancel", release);
+    canvas.addEventListener("pointerleave", release);
   } else {
-    caption.textContent = `${entry.name}（WebGL2非対応のためプレビュー不可）`;
+    caption.textContent = `${entry.name}（WebGL非対応のためプレビュー不可）`;
   }
   entries.set(entry.id, { entry, renderer });
 }
@@ -199,3 +213,8 @@ window.addEventListener("resize", () => applyTileSize(Number(tileSize.value)));
 
 const panel = document.getElementById("panel")!;
 createAdjustmentPanel(panel, adjustments, scheduleRebake, requestHuePick);
+
+const hint = document.createElement("p");
+hint.className = "hint";
+hint.textContent = "プレビュー画像を押している間は原画を表示します";
+panel.appendChild(hint);

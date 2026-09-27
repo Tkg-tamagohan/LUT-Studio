@@ -28,10 +28,15 @@ precision highp sampler3D;
 uniform sampler2D u_image;
 uniform sampler3D u_lut;
 uniform float u_lutSize;
+uniform float u_bypass;
 in vec2 v_uv;
 out vec4 o_color;
 void main() {
   vec4 src = texture(u_image, v_uv);
+  if (u_bypass > 0.5) {
+    o_color = src;
+    return;
+  }
   // テクセル中心を引いて3線形補間させるため scale/offset を掛ける。
   // LutData のメモリ配置は青最速のため座標順は (b, g, r)。
   float scale = (u_lutSize - 1.0) / u_lutSize;
@@ -82,6 +87,8 @@ export interface PreviewRenderer {
   setImage(bitmap: ImageBitmap): void;
   /** 適用するLUTを差し替える。 */
   setLut(lut: LutData): void;
+  /** true の間、LUTを通さず原画像を描画する（原画比較用）。 */
+  setBypass(on: boolean): void;
   /** 現在の画像とLUTで描画する。キャンバスサイズの変更もここで反映する。 */
   render(): void;
   dispose(): void;
@@ -91,7 +98,7 @@ export interface PreviewRenderer {
  * キャンバスに対応するレンダラを作る。WebGL2非対応、
  * またはシェーダ構築に失敗した環境では null を返す。
  */
-export function createRenderer(
+export function createRendererWebgl2(
   canvas: HTMLCanvasElement,
 ): PreviewRenderer | null {
   const gl = canvas.getContext("webgl2", {
@@ -105,6 +112,7 @@ export function createRenderer(
   // uniform の設定は対象プログラムを useProgram してから行う。
   gl.useProgram(program);
   const lutSizeLoc = gl.getUniformLocation(program, "u_lutSize");
+  const bypassLoc = gl.getUniformLocation(program, "u_bypass");
   gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
   gl.uniform1i(gl.getUniformLocation(program, "u_lut"), 1);
 
@@ -190,6 +198,11 @@ export function createRenderer(
           lut.data,
         );
       }
+    },
+
+    setBypass(on) {
+      gl.useProgram(program);
+      gl.uniform1f(bypassLoc, on ? 1 : 0);
     },
 
     render() {
