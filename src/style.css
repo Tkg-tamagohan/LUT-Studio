@@ -190,6 +190,13 @@ body.picking .preview-canvas {
 .slider-label {
   font-size: 0.8rem;
   color: var(--fg-dim);
+  /* クリックで既定値へ戻せることを示す */
+  cursor: pointer;
+}
+
+.slider-label:hover {
+  color: var(--fg);
+  text-decoration: underline dotted;
 }
 
 .slider-value {

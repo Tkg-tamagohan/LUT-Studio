@@ -48,6 +48,7 @@ function makeSlider(
   min: number,
   max: number,
   step: number,
+  defaultValue: number,
   get: () => number,
   set: (v: number) => void,
   onChange: () => void,
@@ -58,6 +59,16 @@ function makeSlider(
   const name = document.createElement("span");
   name.className = "slider-label";
   name.textContent = label;
+  // ラベルクリックで既定値へ戻す。preventDefault でラベル→inputへの既定の
+  // フォーカス移動を抑止し、値だけを書き戻す。
+  name.title = "クリックで既定値に戻す";
+  name.addEventListener("click", (e) => {
+    e.preventDefault();
+    input.value = String(defaultValue);
+    set(defaultValue);
+    value.textContent = input.value;
+    onChange();
+  });
 
   const input = document.createElement("input");
   input.type = "range";
@@ -180,6 +191,7 @@ function addIsolationControls(
       0,
       1,
       0.01,
+      1,
       () => adj.isolation.strength,
       (v) => (adj.isolation.strength = v),
       onChangeAndRefresh,
@@ -245,16 +257,16 @@ function addIsolationControls(
     box.appendChild(pickRow);
 
     box.appendChild(
-      makeSlider("中心色相 (°)", 0, 360, 1, () => target.hue, (v) => (target.hue = v), () => {
+      makeSlider("中心色相 (°)", 0, 360, 1, 0, () => target.hue, (v) => (target.hue = v), () => {
         colorInput.value = rgbToHex(...hueToRgb(target.hue));
         onChangeAndRefresh();
       }),
     );
     box.appendChild(
-      makeSlider("範囲 (°)", 0, 180, 1, () => target.range, (v) => (target.range = v), onChangeAndRefresh),
+      makeSlider("範囲 (°)", 0, 180, 1, 30, () => target.range, (v) => (target.range = v), onChangeAndRefresh),
     );
     box.appendChild(
-      makeSlider("ぼかし (°)", 0, 90, 1, () => target.feather, (v) => (target.feather = v), onChangeAndRefresh),
+      makeSlider("ぼかし (°)", 0, 90, 1, 15, () => target.feather, (v) => (target.feather = v), onChangeAndRefresh),
     );
 
     const remove = document.createElement("button");
@@ -302,10 +314,11 @@ function addLggControls(
     min: number;
     max: number;
     step: number;
+    def: number;
   }[] = [
-    { key: "lift", label: "リフト", min: -1, max: 1, step: 0.01 },
-    { key: "gamma", label: "ガンマ", min: 0.2, max: 4, step: 0.01 },
-    { key: "gain", label: "ゲイン", min: 0.2, max: 4, step: 0.01 },
+    { key: "lift", label: "リフト", min: -1, max: 1, step: 0.01, def: 0 },
+    { key: "gamma", label: "ガンマ", min: 0.2, max: 4, step: 0.01, def: 1 },
+    { key: "gain", label: "ゲイン", min: 0.2, max: 4, step: 0.01, def: 1 },
   ];
   const CHANNEL_LABELS = ["R", "G", "B"] as const;
 
@@ -317,6 +330,7 @@ function addLggControls(
           group.min,
           group.max,
           group.step,
+          group.def,
           () => adj[group.key][ch],
           (v) => (adj[group.key][ch] = v),
           onChange,
@@ -419,6 +433,7 @@ export function createAdjustmentPanel(
         spec.min,
         spec.max,
         spec.step,
+        0,
         () => adj[spec.key],
         (v) => (adj[spec.key] = v),
         onChange,
@@ -461,7 +476,8 @@ export function createAdjustmentPanel(
 
   const hint = document.createElement("p");
   hint.className = "hint";
-  hint.textContent = "プレビュー画像を押している間は原画を表示します";
+  hint.textContent =
+    "プレビュー画像を押している間は原画を表示します。スライダーのラベルをクリックすると既定値に戻ります";
   container.appendChild(hint);
 
   // プリセット読み込み後など、外部からパネル表示を最新状態へ戻すために返す
