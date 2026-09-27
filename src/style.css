@@ -135,13 +135,15 @@ body {
 .preview-card {
   margin: 0;
   flex: 0 0 auto;
+  /* 幅を画像(--tile)に固定し、キャプションのファイル名が
+     画像幅を超えたら必ず省略されるようにする */
+  width: var(--tile);
   max-width: 100%;
 }
 
 .preview-canvas {
   display: block;
-  width: var(--tile);
-  max-width: 100%;
+  width: 100%;
   background: #000;
   border-radius: 4px;
 }

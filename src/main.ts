@@ -249,7 +249,12 @@ function addImage(entry: ImageEntry): void {
         status.textContent = `書き出しに失敗しました: ${entry.name}`;
       });
   });
-  captionRow.append(captionName, exportButton);
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "delete-image";
+  deleteButton.textContent = "✕";
+  deleteButton.title = "この画像を削除";
+  captionRow.append(captionName, exportButton, deleteButton);
   caption.appendChild(captionRow);
   figure.append(canvas, caption);
   grid.appendChild(figure);
@@ -277,6 +282,13 @@ function addImage(entry: ImageEntry): void {
     captionName.textContent = `${entry.name}（WebGL非対応のためプレビュー不可）`;
   }
   entries.set(entry.id, { entry, renderer });
+  deleteButton.addEventListener("click", () => {
+    renderer?.dispose();
+    entry.bitmap.close();
+    entries.delete(entry.id);
+    figure.remove();
+    updateStatus();
+  });
 }
 
 async function addFiles(files: Iterable<File>): Promise<void> {
