@@ -373,3 +373,74 @@ button:disabled {
   font-size: 0.75rem;
   padding: 0.2rem 0.6rem;
 }
+
+/* スマホ版レイアウト：調整パネルを画面下部約30%に固定し、
+   上部いっぱいをプレビューに使う。LUT書き出しはPC作業向けのため非表示。
+   dvh未対応の古いブラウザ向けにvhを先に書いておく（対応環境では後者が勝つ）。 */
+@media (max-width: 640px) {
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  #app-header {
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+    padding: 0.4rem 0.6rem;
+  }
+
+  #app-header h1 {
+    font-size: 1rem;
+  }
+
+  #main {
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    height: auto;
+  }
+
+  #stage {
+    min-height: 0;
+    padding: 0.6rem;
+    /* 下部固定パネルに隠れないようスクロール領域の末尾を空ける */
+    padding-bottom: calc(30dvh + 1rem);
+  }
+
+  /* ドラッグ＆ドロップはスマホでは使えないためボタンだけ残す */
+  #dropzone p {
+    display: none;
+  }
+
+  #grid {
+    justify-content: flex-start;
+  }
+
+  #panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    width: auto;
+    flex: none;
+    height: 30vh;
+    height: 30dvh;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+    padding: 0.6rem 0.8rem;
+    padding-bottom: max(0.6rem, env(safe-area-inset-bottom, 0px));
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* LUT書き出し（.cube / HaldCLUT / ReShade）はスマホ版では出さない。
+     画像PNG書き出しとプリセットは残す。 */
+  .lut-export {
+    display: none;
+  }
+}

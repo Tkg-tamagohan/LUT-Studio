@@ -350,7 +350,7 @@ function addExportControls(
   container.appendChild(heading);
 
   const row = document.createElement("div");
-  row.className = "export-row";
+  row.className = "export-row lut-export";
   const format = document.createElement("select");
   for (const [value, label] of [
     ["cube", ".cube"],
