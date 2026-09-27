@@ -1,4 +1,8 @@
-import type { AdjustmentSet, IsolationTarget } from "../engine";
+import {
+  isolationMaskAt,
+  type AdjustmentSet,
+  type IsolationTarget,
+} from "../engine";
 
 /**
  * 調整パネル。スライダ操作で AdjustmentSet を直接書き換え、
@@ -63,6 +67,45 @@ function newIsolationTarget(): IsolationTarget {
   return { hue: 0, range: 30, feather: 15 };
 }
 
+/** 彩度最大・輝度中間（hsl(h,100%,50%)）の色相環上の色をRGBで返す。 */
+function hueToRgb(hDeg: number): [number, number, number] {
+  const h = ((hDeg % 360) + 360) % 360;
+  const x = 1 - Math.abs(((h / 60) % 2) - 1);
+  if (h < 60) return [1, x, 0];
+  if (h < 120) return [x, 1, 0];
+  if (h < 180) return [0, 1, x];
+  if (h < 240) return [0, x, 1];
+  if (h < 300) return [x, 0, 1];
+  return [1, 0, x];
+}
+
+const GRADIENT_STOPS = 33;
+
+/**
+ * 選択対象が色相環のどこを残すかを示すグラデーション（全周0〜360度）。
+ * 範囲内はその色相の色、範囲外は脱色後の輝度で塗る。見た目がそのまま
+ * LUTの脱色結果を表すよう、脱色量(strength)も反映する。
+ */
+function isolationGradientCss(
+  target: IsolationTarget,
+  strength: number,
+): string {
+  const stops: string[] = [];
+  for (let i = 0; i <= GRADIENT_STOPS; i++) {
+    const h = (i / GRADIENT_STOPS) * 360;
+    const m = isolationMaskAt(target, h);
+    // エンジンと同じ合成：mask=1 は原色、mask=0 は strength ぶん脱色
+    const keep = m + (1 - m) * (1 - strength);
+    const [r, g, b] = hueToRgb(h);
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const mix = (v: number) =>
+      Math.round((luma + (v - luma) * keep) * 255);
+    const pct = ((i / GRADIENT_STOPS) * 100).toFixed(1);
+    stops.push(`rgb(${mix(r)} ${mix(g)} ${mix(b)}) ${pct}%`);
+  }
+  return `linear-gradient(90deg, ${stops.join(", ")})`;
+}
+
 function addIsolationControls(
   container: HTMLElement,
   adj: AdjustmentSet,
@@ -87,6 +130,16 @@ function addIsolationControls(
   enabledRow.append(enabled, enabledText);
   container.appendChild(enabledRow);
 
+  // グラデーションバーの再描画関数を集め、どのスライダを動かしても全部更新する
+  const refreshers: (() => void)[] = [];
+  const refreshAll = () => {
+    for (const refresh of refreshers) refresh();
+  };
+  const onChangeAndRefresh = () => {
+    refreshAll();
+    onChange();
+  };
+
   container.appendChild(
     makeSlider(
       "範囲外の脱色量",
@@ -95,7 +148,7 @@ function addIsolationControls(
       0.01,
       () => adj.isolation.strength,
       (v) => (adj.isolation.strength = v),
-      onChange,
+      onChangeAndRefresh,
     ),
   );
 
@@ -107,14 +160,27 @@ function addIsolationControls(
     legend.textContent = `選択 ${index + 1}`;
     box.appendChild(legend);
 
+    // 色相環上で残る色の範囲をそのまま描くバー（スライダと同じ幅）
+    const gradient = document.createElement("div");
+    gradient.className = "iso-gradient";
+    const refreshGradient = () => {
+      gradient.style.background = isolationGradientCss(
+        target,
+        adj.isolation.strength,
+      );
+    };
+    refreshGradient();
+    refreshers.push(refreshGradient);
+    box.appendChild(gradient);
+
     box.appendChild(
-      makeSlider("中心色相 (°)", 0, 360, 1, () => target.hue, (v) => (target.hue = v), onChange),
+      makeSlider("中心色相 (°)", 0, 360, 1, () => target.hue, (v) => (target.hue = v), onChangeAndRefresh),
     );
     box.appendChild(
-      makeSlider("範囲 (°)", 0, 180, 1, () => target.range, (v) => (target.range = v), onChange),
+      makeSlider("範囲 (°)", 0, 180, 1, () => target.range, (v) => (target.range = v), onChangeAndRefresh),
     );
     box.appendChild(
-      makeSlider("ぼかし (°)", 0, 90, 1, () => target.feather, (v) => (target.feather = v), onChange),
+      makeSlider("ぼかし (°)", 0, 90, 1, () => target.feather, (v) => (target.feather = v), onChangeAndRefresh),
     );
 
     const remove = document.createElement("button");

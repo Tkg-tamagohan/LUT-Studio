@@ -135,6 +135,18 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/**
+ * 単一の選択対象に対する色相 hueDeg の選択度（0〜1）。
+ * 範囲内は1、ぼかし帯で滑らかに0へ落ちる。UIの選択範囲表示にも使う。
+ */
+export function isolationMaskAt(
+  target: IsolationTarget,
+  hueDeg: number,
+): number {
+  const outer = target.range + Math.max(target.feather, 0.001);
+  return 1 - smoothstep(target.range, outer, hueDistance(hueDeg, target.hue));
+}
+
 /** 色温度の最大シフト量。-1〜1の入力に対するチャネル値の変化幅。 */
 const TEMPERATURE_SHIFT = 0.15;
 
@@ -238,8 +250,7 @@ export function compileAdjustments(
       if (chroma > 1e-3) {
         // 複数の選択対象のうち最も強く選択される度合いを採用する
         for (const t of iso.targets) {
-          const outer = t.range + Math.max(t.feather, 0.001);
-          const m = 1 - smoothstep(t.range, outer, hueDistance(h, t.hue));
+          const m = isolationMaskAt(t, h);
           if (m > mask) mask = m;
         }
       }

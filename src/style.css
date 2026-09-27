@@ -5,6 +5,7 @@
 /* モノクロ基調のテーマ。写真調整の視認を邪魔しないよう彩度を持たせない。 */
 :root,
 :root[data-theme="dark"] {
+  --tile: 320px;
   --bg: #1a1a1e;
   --bg-surface: #232329;
   --fg: #e8e8ec;
@@ -90,6 +91,10 @@ body {
   padding: 0.15rem 0.3rem;
 }
 
+.header-select input[type="range"] {
+  width: 7rem;
+}
+
 #main {
   display: flex;
   height: calc(100vh - 3rem);
@@ -133,7 +138,7 @@ body {
 
 .preview-canvas {
   display: block;
-  width: 320px;
+  width: var(--tile);
   max-width: 100%;
   background: #000;
   border-radius: 4px;
@@ -216,6 +221,14 @@ body {
 .iso-target button {
   font-size: 0.75rem;
   padding: 0.2rem 0.6rem;
+}
+
+/* 選択範囲の色相グラデーション（背景は panel.ts が都度設定する） */
+.iso-gradient {
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  margin: 0.2rem 0 0.7rem;
 }
 
 button {
