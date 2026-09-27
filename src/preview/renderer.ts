@@ -101,6 +101,8 @@ export function createRenderer(
   const program = createProgram(gl);
   if (!program) return null;
 
+  // uniform の設定は対象プログラムを useProgram してから行う。
+  gl.useProgram(program);
   const lutSizeLoc = gl.getUniformLocation(program, "u_lutSize");
   gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
   gl.uniform1i(gl.getUniformLocation(program, "u_lut"), 1);
@@ -158,6 +160,8 @@ export function createRenderer(
     setLut(lut) {
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_3D, lutTex);
+      // 画像アップロード用の反転フラグが残っているとLUTの赤軸（z）が反転する。
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
       if (lut.size !== lutSize) {
         lutSize = lut.size;
         // RGB16F はWebGL2コアで線形フィルタ可能。FLOAT型でFloat32Arrayを渡せる。
