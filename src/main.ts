@@ -116,35 +116,69 @@ function exportLutFile(format: LutExportFormat): void {
 /** 書き出し済みの画像ファイル名。同名画像があっても出力名が衝突しないよう管理する。 */
 const exportedImageNames = new Set<string>();
 
-/** LUTを適用した画像を元ファイルの解像度でPNG化して保存する（仕様決定G）。 */
+/**
+ * LUTを適用した画像を元ファイルの解像度でPNG化して保存する（仕様決定G）。
+ * スマホ等ではフル解像度のcanvas確保・エンコードが端末のメモリ上限で失敗し得るため、
+ * 失敗したら半分ずつ縮小して再試行する（最悪でも読み込み済みサイズまでは下げる）。
+ */
 async function exportImage(
   entry: ImageEntry,
   exportLut: LutData,
 ): Promise<string> {
+  const file = entry.file;
+  // 縮小再試行の下限。プレビューに読み込めたサイズまでは必ず試す
+  const limit = Math.max(entry.width, entry.height, 1);
   // プレビュー用に縮小済みのbitmapではなく、元ファイルからフル解像度で再デコードする
-  const bitmap = await createImageBitmap(entry.file);
-  const width = bitmap.width;
-  const height = bitmap.height;
+  let bitmap: ImageBitmap;
   try {
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) throw new Error("canvasコンテキストを取得できません");
-    ctx.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    {
-      const pixels = ctx.getImageData(0, 0, width, height);
-      applyLutToRgba(exportLut, pixels.data);
-      ctx.putImageData(pixels, 0, 0);
+    bitmap = await createImageBitmap(file);
+  } catch {
+    // フル解像度のデコード自体がメモリで失敗する環境では読み込み済みサイズに縮小する
+    bitmap = await createImageBitmap(file, {
+      resizeWidth: entry.width,
+      resizeHeight: entry.height,
+      resizeQuality: "high",
+    });
+  }
+  try {
+    for (;;) {
+      const width = bitmap.width;
+      const height = bitmap.height;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      try {
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) throw new Error("canvasコンテキストを取得できません");
+        ctx.drawImage(bitmap, 0, 0);
+        const pixels = ctx.getImageData(0, 0, width, height);
+        applyLutToRgba(exportLut, pixels.data);
+        ctx.putImageData(pixels, 0, 0);
+        const blob = await canvasToPngBlob(canvas);
+        // エンコード済みのcanvasバッファはすぐ手放し、一括書き出し時のピークを抑える
+        canvas.width = 0;
+        canvas.height = 0;
+        const filename = uniqueImageExportName(
+          baseName(entry.name),
+          exportedImageNames,
+        );
+        downloadBlob(blob, filename);
+        return filename;
+      } catch (e) {
+        canvas.width = 0;
+        canvas.height = 0;
+        const nextW = Math.floor(width / 2);
+        const nextH = Math.floor(height / 2);
+        if (Math.max(nextW, nextH) < limit) throw e;
+        status.textContent = `${entry.name} はメモリ上限のため ${nextW}×${nextH} に縮小して書き出します`;
+        bitmap.close();
+        bitmap = await createImageBitmap(file, {
+          resizeWidth: nextW,
+          resizeHeight: nextH,
+          resizeQuality: "high",
+        });
+      }
     }
-    const blob = await canvasToPngBlob(canvas);
-    // エンコード済みのcanvasバッファはすぐ手放し、一括書き出し時のピークを抑える
-    canvas.width = 0;
-    canvas.height = 0;
-    const filename = uniqueImageExportName(baseName(entry.name), exportedImageNames);
-    downloadBlob(blob, filename);
-    return filename;
   } finally {
     bitmap.close();
   }
