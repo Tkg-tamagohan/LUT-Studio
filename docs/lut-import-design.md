@@ -101,11 +101,13 @@ ICCプロファイルを持つPNGはブラウザが色変換を施してデコ�
 export function withBaseLut(
   base: ImportedLut | null,
   next: ColorTransform,
+  strength?: number, // 既定1。仕様決定W
 ): ColorTransform;
 ```
 
-- `base` が null のときは `next` をそのまま返す。既存の焼き付け経路と等価になる。
+- `base` が null のとき、または `strength` が 0 以下のときは `next` をそのまま返す。既存の焼き付け経路と等価になる。
 - `base` があるときは、入力 c をドメインで正規化した座標 u_i = clamp01((c_i − domainMin_i) / (domainMax_i − domainMin_i)) を求め、既存の `sampleLutTrilinear` で `base.lut` を引き、その結果を `next` に渡す。
+- `strength`（0〜1）はベースLUTの適用強度で、`next` へ渡す色を `c + strength × (base(c) − c)` と線形補間する。未適用側はドメイン正規化前の元入力を基準にするため、0% で画像を素通しにできる（仕様決定W）。
 - ドメインが既定値（0〜1）のとき正規化は恒等であり、同じ経路で済む。
 
 焼き付けは既存の `bakeLut` を変えずに `bakeLut(size, withBaseLut(baseLut, compileAdjustments(adj)))` と呼ぶ。
@@ -120,6 +122,7 @@ export function withBaseLut(
 - **調整パネルの「ベースLUT」セクション**（主要経路）。
   「LUTを読み込み…」ボタンを置き、`.cube` とPNGを受け付ける。
   読み込み済みの間はファイル名とサイズ（例: `filmic.cube（33³）`）を表示し、「解除」ボタンで中立LUTに戻せる。
+  あわせて適用強度スライダー（0〜100%、既定100）を表示し、ベースLUTの効きを連続的に弱められる（仕様決定W）。ベースLUTがない間はスライダーも表示しない。
   セクションの位置はアイソレーション系と書き出しの間を想定する。
 - **画像ドロップゾーン**。拡張子 `.cube` のファイルのみベースLUTとして振り分ける。
   PNGは写真と区別がつかないため、ドロップゾーンでは常に画像として扱う。
@@ -138,7 +141,7 @@ LUT書き出しと同様にPC作業を想定する機能とし、「ベースLUT
 ## プリセットとの関係
 
 JSONプリセットは調整パラメータのみを保持する（仕様決定E、U）。
-ベースLUTは含めない。プリセットの読み込みはベースLUTを変更しない。
+ベースLUTは含めない。適用強度もベースLUTと一体の状態としてプリセットに含めない（仕様決定W）。プリセットの読み込みはベースLUTを変更しない。
 
 プリセットは数値パラメータの組を収める軽量なJSONであり、size³×3 のfloat配列であるベースLUTを埋め込むと数MB級になるため除外する。
 ベースLUTは `.cube` やPNGとして単独で持ち歩ける形式を持つため、プリセットは「ベースLUTの上に乗せる調整」だけを担う分離とする。

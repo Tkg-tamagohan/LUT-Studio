@@ -399,6 +399,37 @@ describe("IMP-26: PNG由来ベースLUTの8bit誤差を許容する", () => {
   });
 });
 
+describe("IMP-28: 適用強度が線形補間で効く", () => {
+  const identity = (r: number, g: number, b: number, out: Float32Array) => {
+    out[0] = r;
+    out[1] = g;
+    out[2] = b;
+  };
+  const base = imported(permutedLut(4)); // (1,0,0) → (0,1,0) へ写す
+
+  it("strength=1 でフル適用", () => {
+    const out = new Float32Array(3);
+    withBaseLut(base, identity, 1)(1, 0, 0, out);
+    expect([...out]).toEqual([0, 1, 0]);
+  });
+
+  it("strength=0.5 で入力と適用結果の中間になる", () => {
+    const out = new Float32Array(3);
+    withBaseLut(base, identity, 0.5)(1, 0, 0, out);
+    // (1,0,0) + 0.5×((0,1,0)−(1,0,0)) = (0.5, 0.5, 0)
+    expect(out[0]).toBeCloseTo(0.5, 6);
+    expect(out[1]).toBeCloseTo(0.5, 6);
+    expect(out[2]).toBeCloseTo(0, 6);
+  });
+
+  it("strength=0 でベースLUTなしと同等（next 直通）", () => {
+    expect(withBaseLut(base, identity, 0)).toBe(identity);
+    const out = new Float32Array(3);
+    withBaseLut(base, identity, 0)(1, 0, 0, out);
+    expect([...out]).toEqual([1, 0, 0]);
+  });
+});
+
 describe("IMP-27: .cube 往復はほぼロスレス", () => {
   it("lutToCube → parseCubeLut → lutToCube で出力が一致する", () => {
     const original = permutedLut(33);

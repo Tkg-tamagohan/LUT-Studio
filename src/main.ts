@@ -47,6 +47,8 @@ const adjustments = neutralAdjustments();
 let baseLut: ImportedLut | null = null;
 /** ベースLUTセクションとステータスに表示する名前（例: `filmic.cube（33³）`）。 */
 let baseLutLabel: string | null = null;
+/** ベースLUTの適用強度（%）。0 で未適用、100 でフル適用（仕様決定W）。 */
+let lutStrength = 100;
 let lut: LutData = bakeLut(
   PREVIEW_LUT_SIZE,
   compileAdjustments(adjustments),
@@ -68,7 +70,11 @@ function scheduleRebake(): void {
     bakeScheduled = false;
     lut = bakeLut(
       PREVIEW_LUT_SIZE,
-      withBaseLut(baseLut, compileAdjustments(adjustments, { maskPreview })),
+      withBaseLut(
+        baseLut,
+        compileAdjustments(adjustments, { maskPreview }),
+        lutStrength / 100,
+      ),
     );
     for (const { renderer } of entries.values()) {
       renderer?.setLut(lut);
@@ -92,7 +98,7 @@ function updateStatus(): void {
 function bakeExportLut(size: number): LutData {
   return bakeLut(
     size,
-    withBaseLut(baseLut, compileAdjustments(adjustments)),
+    withBaseLut(baseLut, compileAdjustments(adjustments), lutStrength / 100),
   );
 }
 
@@ -585,5 +591,10 @@ const rebuildPanel = createAdjustmentPanel(
     loadLut: (file) => void loadBaseLutFile(file),
     clearLut: clearBaseLut,
     baseLutLabel: () => baseLutLabel,
+    lutStrength: () => lutStrength,
+    setLutStrength: (v) => {
+      lutStrength = Math.min(100, Math.max(0, Math.round(v)));
+      scheduleRebake();
+    },
   },
 );

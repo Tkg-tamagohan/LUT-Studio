@@ -25,6 +25,9 @@ export interface PanelActions {
   clearLut(): void;
   /** 現在のベースLUTの表示名（例: `filmic.cube（33³）`）。未読み込みは null。 */
   baseLutLabel(): string | null;
+  /** ベースLUTの適用強度（0〜100%、既定100）（仕様決定W）。 */
+  lutStrength(): number;
+  setLutStrength(percent: number): void;
 }
 
 /**
@@ -424,6 +427,20 @@ function addBaseLutControls(
     clear.addEventListener("click", () => actions.clearLut());
     current.append(name, clear);
     section.appendChild(current);
+
+    // 読み込み済みの間だけ適用強度スライダーを出す（仕様決定W）
+    section.appendChild(
+      makeSlider(
+        "適用強度 (%)",
+        0,
+        100,
+        1,
+        100,
+        () => actions.lutStrength(),
+        (v) => actions.setLutStrength(v),
+        () => {},
+      ),
+    );
   }
 
   container.appendChild(section);
