@@ -135,8 +135,8 @@ export function presetFromJson(text: string): AdjustmentSet {
     curveG: readCurve(obj, "curveG"),
     curveB: readCurve(obj, "curveB"),
     lift: readVec3(obj, "lift", -1, 1),
-    gamma: readVec3(obj, "gamma", 0.01, 10),
-    gain: readVec3(obj, "gain", 0.01, 10),
+    gamma: readVec3(obj, "gamma", 0.2, 4),
+    gain: readVec3(obj, "gain", 0.2, 4),
     isolation: {
       enabled: isoObj.enabled,
       strength: readNumber(isoObj, "strength", 0, 1),
