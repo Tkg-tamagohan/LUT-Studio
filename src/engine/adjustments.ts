@@ -232,12 +232,16 @@ export function compileAdjustments(
     const iso = adj.isolation;
     if (iso.enabled) {
       const h = hueDegrees(r, g, b);
-      // 複数の選択対象のうち最も強く選択される度合いを採用する
+      // 無彩色は色相を持たないため、どの選択対象にも含めない
+      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
       let mask = 0;
-      for (const t of iso.targets) {
-        const outer = t.range + Math.max(t.feather, 0.001);
-        const m = 1 - smoothstep(t.range, outer, hueDistance(h, t.hue));
-        if (m > mask) mask = m;
+      if (chroma > 1e-3) {
+        // 複数の選択対象のうち最も強く選択される度合いを採用する
+        for (const t of iso.targets) {
+          const outer = t.range + Math.max(t.feather, 0.001);
+          const m = 1 - smoothstep(t.range, outer, hueDistance(h, t.hue));
+          if (m > mask) mask = m;
+        }
       }
       if (opts?.maskPreview) {
         out[0] = mask;

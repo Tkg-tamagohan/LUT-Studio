@@ -337,6 +337,19 @@ describe("ISO-03 選択範囲のマスクプレビュー", () => {
     expect(out[1]).toBeCloseTo(0, 5);
     expect(out[2]).toBeCloseTo(0, 5);
   });
+
+  it("無彩色は色相を持たないため選択されない", () => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      enabled: true,
+      strength: 1,
+      targets: [{ hue: 0, range: 30, feather: 10 }],
+    };
+    const maskTransform = compileAdjustments(adj, { maskPreview: true });
+    const out = new Float32Array(3);
+    maskTransform(0.5, 0.5, 0.5, out);
+    expect(out[0]).toBeCloseTo(0, 5);
+  });
 });
 
 // 以下は外部ソフト側の規約で書き出し物をデコードし、元LUTと全点照合する互換テスト。
