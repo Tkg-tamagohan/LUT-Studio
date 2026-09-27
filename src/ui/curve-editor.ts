@@ -39,7 +39,7 @@ export function createCurveEditor(
   // 意図せず変わるため、detailsで格納する。既定はスマホで畳み、
   // デスクトップで展開。一度操作したらその状態を維持する。
   const details = document.createElement("details");
-  details.className = "curve-details";
+  details.className = "panel-details";
   const summary = document.createElement("summary");
   summary.textContent = "RGBカーブ";
   details.appendChild(summary);

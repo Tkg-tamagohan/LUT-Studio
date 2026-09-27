@@ -353,13 +353,13 @@ button:disabled {
 
 /* RGBカーブエディタ：幅はパネルいっぱい。バッファはJS側で表示サイズに合わせる。
    格納・展開はdetailsに任せ、summaryをh3相当の見出しに見せる */
-.curve-details {
+.panel-details {
   margin: 1.2rem 0 0;
   border-top: 1px solid var(--border);
   padding-top: 0.5rem;
 }
 
-.curve-details > summary {
+.panel-details > summary {
   font-size: 0.85rem;
   font-weight: bold;
   cursor: pointer;

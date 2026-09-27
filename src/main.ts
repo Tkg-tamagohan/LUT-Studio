@@ -87,11 +87,17 @@ function baseName(filename: string): string {
   return filename.replace(/\.[^.]+$/, "") || "image";
 }
 
+/** 書き出しLUT名に付けるタイムスタンプ（_yyMMddhhmm、ローカル時刻）。 */
+function lutTimestamp(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `_${String(d.getFullYear()).slice(-2)}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
 async function exportPngLut(kind: "hald" | "reshade"): Promise<void> {
   const exportLut = bakeExportLut(IMAGE_LUT_SIZE);
   const img = kind === "hald" ? lutToHald(exportLut) : lutToReShade(exportLut);
   const blob = await rgbaToPngBlob(img);
-  const name = `lut-studio-${kind}.png`;
+  const name = `lut-studio-${kind}${lutTimestamp()}.png`;
   downloadBlob(blob, name);
   status.textContent = `LUTを書き出しました: ${name}`;
 }
@@ -99,8 +105,9 @@ async function exportPngLut(kind: "hald" | "reshade"): Promise<void> {
 function exportLutFile(format: LutExportFormat): void {
   if (format === "cube") {
     const cube = lutToCube(bakeExportLut(CUBE_LUT_SIZE));
-    downloadBlob(new Blob([cube], { type: "text/plain" }), "lut-studio.cube");
-    status.textContent = "LUTを書き出しました: lut-studio.cube";
+    const name = `lut-studio${lutTimestamp()}.cube`;
+    downloadBlob(new Blob([cube], { type: "text/plain" }), name);
+    status.textContent = `LUTを書き出しました: ${name}`;
     return;
   }
   void exportPngLut(format);

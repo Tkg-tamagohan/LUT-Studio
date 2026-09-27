@@ -95,6 +95,12 @@ function newIsolationTarget(): IsolationTarget {
   return { hue: 0, range: 30, feather: 15 };
 }
 
+/**
+ * LGGの<details>開閉状態。パネル再構築で作り直されても維持するため
+ * モジュールに置く。未操作なら画面幅で決める（カーブと同じ）。
+ */
+let lggDetailsOpen: boolean | null = null;
+
 /** 彩度最大・輝度中間（hsl(h,100%,50%)）の色相環上の色をRGBで返す。 */
 function hueToRgb(hDeg: number): [number, number, number] {
   const h = ((hDeg % 360) + 360) % 360;
@@ -298,15 +304,24 @@ function addIsolationControls(
   container.appendChild(add);
 }
 
-/** リフト・ガンマ・ゲイン。チャネル別に小さいスライダを並べる。 */
+/** リフト・ガンマ・ゲイン。チャネル別に小さいスライダを並べる。
+ *  9本あるため、スマホの狭い下ペインではdetailsで格納する。 */
 function addLggControls(
   container: HTMLElement,
   adj: AdjustmentSet,
   onChange: () => void,
 ): void {
-  const heading = document.createElement("h3");
-  heading.textContent = "リフト・ガンマ・ゲイン";
-  container.appendChild(heading);
+  const details = document.createElement("details");
+  details.className = "panel-details";
+  const summary = document.createElement("summary");
+  summary.textContent = "リフト・ガンマ・ゲイン";
+  details.appendChild(summary);
+  details.open =
+    lggDetailsOpen ?? !window.matchMedia("(max-width: 640px)").matches;
+  details.addEventListener("toggle", () => {
+    lggDetailsOpen = details.open;
+  });
+  container.appendChild(details);
 
   const groups: {
     key: "lift" | "gamma" | "gain";
@@ -324,7 +339,7 @@ function addLggControls(
 
   for (const group of groups) {
     for (let ch = 0; ch < 3; ch++) {
-      container.appendChild(
+      details.appendChild(
         makeSlider(
           `${group.label} ${CHANNEL_LABELS[ch]}`,
           group.min,
