@@ -117,10 +117,18 @@ function exportLutFile(format: LutExportFormat): void {
 const exportedImageNames = new Set<string>();
 
 /**
- * LUTを適用した画像を元ファイルの解像度でPNG化して保存する（仕様決定G）。
- * スマホ等ではフル解像度のcanvas確保・エンコードが端末のメモリ上限で失敗し得るため、
- * 失敗したら半分ずつ縮小して再試行する（最悪でも読み込み済みサイズまでは下げる）。
+ * LUTを適用した画像をPNG化して保存する。原則として元ファイルの解像度
+ * （仕様決定G）。ただし端末のcanvas上限を超える巨大画像はエラーにならず
+ * ラスタが黙って縮小され画質が劣化するため、タッチ中心端末では事前に
+ * EXPORT_MAX_SIDE_CONSTRAINED まで縮小し、それでも失敗した場合は
+ * 半分ずつ縮小して再試行する（仕様決定Q）。
  */
+/**
+ * モバイル等のcanvas上限に安全に収める長辺(px)。これを超えるとブラウザが
+ * ラスタを黙って縮小し、書き出しが「高解像度だが粗い」になるため。
+ */
+const EXPORT_MAX_SIDE_CONSTRAINED = 4096;
+
 async function exportImage(
   entry: ImageEntry,
   exportLut: LutData,
@@ -139,6 +147,29 @@ async function exportImage(
       resizeHeight: entry.height,
       resizeQuality: "high",
     });
+  }
+  // タッチ中心端末ではcanvasの暗黙縮小を防ぐため先に縮小する
+  const constrained =
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(max-width: 640px)").matches;
+  // 縮小して書き出したときの出力寸法。成功時のステータスに残す
+  let shrunkNote: string | null = null;
+  if (
+    constrained &&
+    Math.max(bitmap.width, bitmap.height) > EXPORT_MAX_SIDE_CONSTRAINED
+  ) {
+    const scale =
+      EXPORT_MAX_SIDE_CONSTRAINED / Math.max(bitmap.width, bitmap.height);
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    bitmap.close();
+    bitmap = await createImageBitmap(file, {
+      resizeWidth: w,
+      resizeHeight: h,
+      resizeQuality: "high",
+    });
+    shrunkNote = `${w}×${h}に縮小`;
+    status.textContent = `${entry.name} は端末のcanvas上限のため ${w}×${h} に縮小して書き出します`;
   }
   try {
     for (;;) {
@@ -163,13 +194,14 @@ async function exportImage(
           exportedImageNames,
         );
         downloadBlob(blob, filename);
-        return filename;
+        return shrunkNote ? `${filename}（${shrunkNote}）` : filename;
       } catch (e) {
         canvas.width = 0;
         canvas.height = 0;
         const nextW = Math.floor(width / 2);
         const nextH = Math.floor(height / 2);
         if (Math.max(nextW, nextH) < limit) throw e;
+        shrunkNote = `${nextW}×${nextH}に縮小`;
         status.textContent = `${entry.name} はメモリ上限のため ${nextW}×${nextH} に縮小して書き出します`;
         bitmap.close();
         bitmap = await createImageBitmap(file, {
