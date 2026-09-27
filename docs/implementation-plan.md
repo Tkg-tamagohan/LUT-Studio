@@ -31,7 +31,7 @@
 - [ ] Vite + TypeScript + Vitest のスキャフォールド
 - [ ] lintとtestのCI、GitHub Pagesへのデプロイ用Workflow
 - [ ] 中立LUT生成（33³）と `.cube` 書き出し
-- [ ] PNGアトラス書き出し（64³）
+- [ ] PNGアトラス書き出し（64³。HaldCLUTとReShadeの両配置形式）
 - [ ] 調整パイプラインの型定義と、中立LUTへ適用したとき恒等になることのテスト
 
 受け入れ条件：生成した `.cube` が仕様どおりの形式で出力され、engineのテストがパスする。
@@ -54,7 +54,7 @@
 
 ### Phase 4: 書き出しとプリセット
 
-- [ ] LUT書き出しUI（`.cube` とPNG）
+- [ ] LUT書き出しUI（`.cube` とPNG。PNGはHaldCLUT／ReShadeを選択式）
 - [ ] LUT適用済み画像のPNG書き出し
 - [ ] JSONプリセットの保存・読み込み
 
