@@ -249,6 +249,109 @@ describe("ADJ-08 色温度は暖色方向で赤を増し青を減らす", () => 
   });
 });
 
+describe("ISO-01 分離（部分色残し）", () => {
+  const isolateRed = () => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      enabled: true,
+      strength: 1,
+      targets: [{ hue: 0, range: 30, feather: 10 }],
+    };
+    return adj;
+  };
+
+  it("範囲内の色はそのまま残る", () => {
+    const out = new Float32Array(3);
+    applyAdjustments(1, 0, 0, isolateRed(), out);
+    expect(out[0]).toBeCloseTo(1, 5);
+    expect(out[1]).toBeCloseTo(0, 5);
+    expect(out[2]).toBeCloseTo(0, 5);
+  });
+
+  it("範囲外の色は輝度へ脱色される", () => {
+    const out = new Float32Array(3);
+    applyAdjustments(0, 0, 1, isolateRed(), out);
+    expect(out[0]).toBeCloseTo(out[1], 5);
+    expect(out[1]).toBeCloseTo(out[2], 5);
+    expect(out[0]).toBeCloseTo(0.0722, 3);
+  });
+
+  it("強度が弱いと範囲外の脱色が緩和される", () => {
+    const adj = isolateRed();
+    adj.isolation.strength = 0.5;
+    const out = new Float32Array(3);
+    applyAdjustments(0, 0, 1, adj, out);
+    // 青成分が輝度より残るが完全には残らない
+    expect(out[2]).toBeGreaterThan(out[0] + 0.1);
+    expect(out[2]).toBeLessThan(0.9);
+  });
+
+  it("色相環の0/360境界をまたいで選択できる", () => {
+    const adj = isolateRed();
+    adj.isolation.targets[0].hue = 350;
+    const out = new Float32Array(3);
+    applyAdjustments(1, 0, 0, adj, out);
+    expect(out[0]).toBeCloseTo(1, 5);
+    expect(out[1]).toBeCloseTo(0, 5);
+  });
+});
+
+describe("ISO-02 複数色相の選択", () => {
+  it("離れた2色相を同時に残せる", () => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      enabled: true,
+      strength: 1,
+      targets: [
+        { hue: 0, range: 30, feather: 10 },
+        { hue: 240, range: 30, feather: 10 },
+      ],
+    };
+    const out = new Float32Array(3);
+    // 赤と青は残る
+    applyAdjustments(1, 0, 0, adj, out);
+    expect(out[0]).toBeCloseTo(1, 5);
+    applyAdjustments(0, 0, 1, adj, out);
+    expect(out[2]).toBeCloseTo(1, 5);
+    // 緑（どちらの範囲にも入らない）は脱色される
+    applyAdjustments(0, 1, 0, adj, out);
+    expect(out[0]).toBeCloseTo(out[1], 5);
+    expect(out[1]).toBeCloseTo(out[2], 5);
+  });
+});
+
+describe("ISO-03 選択範囲のマスクプレビュー", () => {
+  it("範囲内は白・範囲外は黒のグレースケールを返す", () => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      enabled: true,
+      strength: 1,
+      targets: [{ hue: 0, range: 30, feather: 10 }],
+    };
+    const maskTransform = compileAdjustments(adj, { maskPreview: true });
+    const out = new Float32Array(3);
+    maskTransform(1, 0, 0, out);
+    expect(out[0]).toBeCloseTo(1, 5);
+    maskTransform(0, 0, 1, out);
+    expect(out[0]).toBeCloseTo(0, 5);
+    expect(out[1]).toBeCloseTo(0, 5);
+    expect(out[2]).toBeCloseTo(0, 5);
+  });
+
+  it("無彩色は色相を持たないため選択されない", () => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      enabled: true,
+      strength: 1,
+      targets: [{ hue: 0, range: 30, feather: 10 }],
+    };
+    const maskTransform = compileAdjustments(adj, { maskPreview: true });
+    const out = new Float32Array(3);
+    maskTransform(0.5, 0.5, 0.5, out);
+    expect(out[0]).toBeCloseTo(0, 5);
+  });
+});
+
 // 以下は外部ソフト側の規約で書き出し物をデコードし、元LUTと全点照合する互換テスト。
 // 各デコード関数は外部形式の仕様から独立に書き、実装の詳細を共有しない。
 

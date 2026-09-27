@@ -31,12 +31,37 @@ export interface AdjustmentSet {
   gamma: [number, number, number];
   /** ゲイン（ハイライト）。各色0より大きい。1で中立。 */
   gain: [number, number, number];
+  /** 色相アイソレーション。mode="off" で無効。 */
+  isolation: IsolationParams;
 }
 
 export const IDENTITY_CURVE: CurvePoint[] = [
   { x: 0, y: 0 },
   { x: 1, y: 1 },
 ];
+
+/** 色相アイソレーションで彩色を残す選択対象（仕様決定K）。 */
+export interface IsolationTarget {
+  /** 選択の中心となる色相。0〜360度。 */
+  hue: number;
+  /** 選択範囲の半幅。0〜180度。 */
+  range: number;
+  /** 選択範囲の端を滑らかにする幅。0〜90度。 */
+  feather: number;
+}
+
+/**
+ * 色相アイソレーションの設定。選択した色相範囲（複数可）の彩色だけを残し、
+ * それ以外を輝度へ脱色する「部分色残し」。
+ */
+export interface IsolationParams {
+  /** 無効時は入力をそのまま通す。 */
+  enabled: boolean;
+  /** 範囲外の脱色量。0〜1。1で完全なモノクロ化。 */
+  strength: number;
+  /** 残したい色相の選択一覧。複数登録できる（肌色＋別の特定色など）。 */
+  targets: IsolationTarget[];
+}
 
 export function neutralAdjustments(): AdjustmentSet {
   return {
@@ -52,6 +77,11 @@ export function neutralAdjustments(): AdjustmentSet {
     lift: [0, 0, 0],
     gamma: [1, 1, 1],
     gain: [1, 1, 1],
+    isolation: {
+      enabled: false,
+      strength: 1,
+      targets: [{ hue: 0, range: 30, feather: 15 }],
+    },
   };
 }
 
@@ -80,6 +110,42 @@ export function evaluateCurve(points: CurvePoint[], x: number): number {
 const LUMA_R = 0.2126;
 const LUMA_G = 0.7152;
 const LUMA_B = 0.0722;
+
+/** RGB（各0〜1）から色相（度）を求める。無彩色は0を返す。UIのカラーピッカーでも使う。 */
+export function hueDegrees(r: number, g: number, b: number): number {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d < 1e-6) return 0;
+  let h: number;
+  if (max === r) h = (60 * (g - b)) / d;
+  else if (max === g) h = (60 * (b - r)) / d + 120;
+  else h = (60 * (r - g)) / d + 240;
+  return ((h % 360) + 360) % 360;
+}
+
+/** 色相環上の最短距離（0〜180度）。 */
+function hueDistance(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = clamp01((x - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * 単一の選択対象に対する色相 hueDeg の選択度（0〜1）。
+ * 範囲内は1、ぼかし帯で滑らかに0へ落ちる。UIの選択範囲表示にも使う。
+ */
+export function isolationMaskAt(
+  target: IsolationTarget,
+  hueDeg: number,
+): number {
+  const outer = target.range + Math.max(target.feather, 0.001);
+  return 1 - smoothstep(target.range, outer, hueDistance(hueDeg, target.hue));
+}
 
 /** 色温度の最大シフト量。-1〜1の入力に対するチャネル値の変化幅。 */
 const TEMPERATURE_SHIFT = 0.15;
@@ -119,7 +185,18 @@ function lookupCurve(table: CurveTable | null, x: number): number {
  * 適用順は 露出 → 色温度 → コントラスト → 彩度 → 色相 → カーブ →
  * リフト/ガンマ/ゲイン とし、最後に0〜1へ丸める。
  */
-export function compileAdjustments(adj: AdjustmentSet): ColorTransform {
+export interface CompileOptions {
+  /**
+   * true のとき、アイソレーションの選択範囲（マスク）をグレースケールで出力する。
+   * プレビュー上で選択範囲を確認する用途で、書き出しLUTには使わない。
+   */
+  maskPreview?: boolean;
+}
+
+export function compileAdjustments(
+  adj: AdjustmentSet,
+  opts?: CompileOptions,
+): ColorTransform {
   const exp = Math.pow(2, adj.exposure);
   const tempShift = adj.temperature * TEMPERATURE_SHIFT;
   const contrastFactor = 1 + adj.contrast;
@@ -162,6 +239,33 @@ export function compileAdjustments(adj: AdjustmentSet): ColorTransform {
       r = nr;
       g = ng;
       b = nb;
+    }
+
+    const iso = adj.isolation;
+    if (iso.enabled) {
+      const h = hueDegrees(r, g, b);
+      // 無彩色は色相を持たないため、どの選択対象にも含めない
+      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+      let mask = 0;
+      if (chroma > 1e-3) {
+        // 複数の選択対象のうち最も強く選択される度合いを採用する
+        for (const t of iso.targets) {
+          const m = isolationMaskAt(t, h);
+          if (m > mask) mask = m;
+        }
+      }
+      if (opts?.maskPreview) {
+        out[0] = mask;
+        out[1] = mask;
+        out[2] = mask;
+        return;
+      }
+      const lumaI = r * LUMA_R + g * LUMA_G + b * LUMA_B;
+      // mask=1 は原色、mask=0 は strength に応じて脱色
+      const keep = mask + (1 - mask) * (1 - iso.strength);
+      r = lumaI + (r - lumaI) * keep;
+      g = lumaI + (g - lumaI) * keep;
+      b = lumaI + (b - lumaI) * keep;
     }
 
     r = lookupCurve(tableR, lookupCurve(tableMaster, r));
