@@ -120,8 +120,8 @@ export function presetFromJson(text: string): AdjustmentSet {
   if (typeof isoObj.enabled !== "boolean") {
     fail("isolation.enabled が真偽値ではありません");
   }
-  if (!Array.isArray(isoObj.targets)) {
-    fail("isolation.targets が配列ではありません");
+  if (!Array.isArray(isoObj.targets) || isoObj.targets.length === 0) {
+    fail("isolation.targets が1要素以上の配列ではありません");
   }
 
   return {
