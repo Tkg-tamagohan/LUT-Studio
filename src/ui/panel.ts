@@ -13,12 +13,18 @@ type PickFromImage = (onPicked: (hueDeg: number) => void) => void;
 /** 書き出すLUTの形式（仕様決定A・J）。 */
 export type LutExportFormat = "cube" | "hald" | "reshade";
 
-/** パネルから呼び出す書き出し・プリセット操作。実体は main.ts が持つ。 */
+/** パネルから呼び出す書き出し・プリセット・ベースLUT操作。実体は main.ts が持つ。 */
 export interface PanelActions {
   exportLut(format: LutExportFormat): void;
   exportImages(): void;
   savePreset(): void;
   loadPreset(file: File): void;
+  /** `.cube` またはPNG画像LUTをベースLUTとして読み込む（仕様決定T）。 */
+  loadLut(file: File): void;
+  /** ベースLUTを解除して中立LUTに戻す（仕様決定U）。 */
+  clearLut(): void;
+  /** 現在のベースLUTの表示名（例: `filmic.cube（33³）`）。未読み込みは null。 */
+  baseLutLabel(): string | null;
 }
 
 /**
@@ -372,6 +378,57 @@ function addLggControls(
   }
 }
 
+/**
+ * ベースLUTの読み込みと解除（仕様決定T・U）。
+ * モバイルではPC作業向け機能のためセクションごと非表示にする（仕様決定V）。
+ */
+function addBaseLutControls(
+  container: HTMLElement,
+  actions: PanelActions,
+): void {
+  const section = document.createElement("div");
+  section.className = "lut-import";
+
+  const heading = document.createElement("h3");
+  heading.textContent = "ベースLUT";
+  section.appendChild(heading);
+
+  const row = document.createElement("div");
+  row.className = "export-row";
+  const load = document.createElement("button");
+  load.type = "button";
+  load.textContent = "LUTを読み込み…";
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".cube,.png,image/png";
+  input.hidden = true;
+  input.addEventListener("change", () => {
+    if (input.files?.[0]) actions.loadLut(input.files[0]);
+    input.value = "";
+  });
+  load.addEventListener("click", () => input.click());
+  row.append(load, input);
+  section.appendChild(row);
+
+  const label = actions.baseLutLabel();
+  if (label !== null) {
+    const current = document.createElement("div");
+    current.className = "export-row";
+    const name = document.createElement("span");
+    name.className = "base-lut-name";
+    name.textContent = label;
+    name.title = label;
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.textContent = "解除";
+    clear.addEventListener("click", () => actions.clearLut());
+    current.append(name, clear);
+    section.appendChild(current);
+  }
+
+  container.appendChild(section);
+}
+
 /** LUT書き出しと画像書き出しの操作列（仕様決定A・G・J）。 */
 function addExportControls(
   container: HTMLElement,
@@ -483,6 +540,8 @@ export function createAdjustmentPanel(
   addIsolationControls(container, adj, onChange, rebuildPanel, onPickStart);
 
   if (actions) {
+    // ベースLUTはアイソレーション系と書き出しの間に置く（lut-import-design.md）
+    addBaseLutControls(container, actions);
     addExportControls(container, actions);
     addPresetControls(container, actions);
   }
