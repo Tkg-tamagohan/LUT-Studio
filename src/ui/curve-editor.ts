@@ -159,6 +159,26 @@ export function createCurveEditor(
 
   let dragging = -1;
 
+  // window リスナーはドラッグ中だけ登録する（パネル再作成時に残らないよう）
+  const onMove = (e: MouseEvent) => {
+    if (dragging < 0) return;
+    const [px, py] = canvasPos(e);
+    const p = toCurve(px, py);
+    const pts = points();
+    pts[dragging] = p;
+    // ドラッグ中にxを越えたら順序を保ってインデックスを追従する
+    pts.sort((a, b) => a.x - b.x);
+    dragging = pts.indexOf(p);
+    draw();
+    onChange();
+  };
+
+  const onUp = () => {
+    dragging = -1;
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", onUp);
+  };
+
   canvas.addEventListener("mousedown", (e) => {
     const [px, py] = canvasPos(e);
     const idx = hitIndex(px, py);
@@ -174,24 +194,9 @@ export function createCurveEditor(
       draw();
       onChange();
     }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
     e.preventDefault();
-  });
-
-  window.addEventListener("mousemove", (e) => {
-    if (dragging < 0) return;
-    const [px, py] = canvasPos(e);
-    const p = toCurve(px, py);
-    const pts = points();
-    pts[dragging] = p;
-    // ドラッグ中にxを越えたら順序を保ってインデックスを追従する
-    pts.sort((a, b) => a.x - b.x);
-    dragging = pts.indexOf(p);
-    draw();
-    onChange();
-  });
-
-  window.addEventListener("mouseup", () => {
-    dragging = -1;
   });
 
   canvas.addEventListener("dblclick", (e) => {
@@ -219,4 +224,6 @@ export function createCurveEditor(
     onChange();
   });
   container.appendChild(resetCurve);
+
+  draw();
 }

@@ -151,6 +151,10 @@ export function createRendererWebgl1(
   gl.uniform1i(uLoc("u_image"), 0);
   gl.uniform1i(uLoc("u_lut"), 1);
 
+  // LUTはRGB8の隙間なし配列。行幅が4の倍数でないサイズ（例：texSize=198）でも
+  // 転送が壊れないようアライメントを1に下げる。
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+
   const setupTex = () => {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);

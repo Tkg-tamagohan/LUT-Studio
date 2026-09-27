@@ -15,8 +15,13 @@ export function createRenderer(
 ): PreviewRenderer | null {
   const forceWebgl1 = new URLSearchParams(location.search).has("webgl1");
   if (!forceWebgl1) {
-    const r = createRendererWebgl2(canvas);
-    if (r) return r;
+    // WebGL2の構築は捨てキャンバスで試す。表示キャンバス上で一度コンテキストを
+    // 確保すると種別を変えられず、失敗時にWebGL1へ切り替えられなくなるため。
+    const probe = createRendererWebgl2(document.createElement("canvas"));
+    if (probe) {
+      probe.dispose();
+      return createRendererWebgl2(canvas);
+    }
   }
   return createRendererWebgl1(canvas);
 }
