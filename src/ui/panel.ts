@@ -5,14 +5,8 @@ import {
   type IsolationTarget,
 } from "../engine";
 
-// Chromium系の EyeDropper API。画面全体から色を拾える（プレビュー画像の肌色など）。
-declare global {
-  interface Window {
-    EyeDropper?: new () => {
-      open(options?: { signal?: AbortSignal }): Promise<{ sRGBHex: string }>;
-    };
-  }
-}
+/** 画像上のクリックで色相を拾いたい時に呼ぶ。結果は色相（度）で返る。 */
+type PickFromImage = (onPicked: (hueDeg: number) => void) => void;
 
 /**
  * 調整パネル。スライダ操作で AdjustmentSet を直接書き換え、
@@ -137,6 +131,7 @@ function addIsolationControls(
   adj: AdjustmentSet,
   onChange: () => void,
   rebuildPanel: () => void,
+  onPickStart?: PickFromImage,
 ): void {
   const heading = document.createElement("h3");
   heading.textContent = "アイソレーション（分離）";
@@ -220,20 +215,17 @@ function addIsolationControls(
     });
     pickRow.append(pickLabel, colorInput);
 
-    // 対応環境ではプレビュー画像上から直接スポイトで拾える
-    if (window.EyeDropper) {
+    // プレビュー画像上をクリックして元画像の色から色相を拾う
+    if (onPickStart) {
       const eyedrop = document.createElement("button");
       eyedrop.type = "button";
       eyedrop.textContent = "画像から拾う";
       eyedrop.addEventListener("click", () => {
-        void new window.EyeDropper!()
-          .open()
-          .then(({ sRGBHex }) => {
-            applyPickedHue(sRGBHex);
-            rebuildPanel();
-          })
-          // キャンセル時は何もしない
-          .catch(() => {});
+        onPickStart((hue) => {
+          target.hue = Math.round(hue);
+          rebuildPanel();
+          onChange();
+        });
       });
       pickRow.appendChild(eyedrop);
     }
@@ -285,10 +277,11 @@ export function createAdjustmentPanel(
   container: HTMLElement,
   adj: AdjustmentSet,
   onChange: () => void,
+  onPickStart?: PickFromImage,
 ): void {
   const rebuildPanel = () => {
     container.replaceChildren();
-    createAdjustmentPanel(container, adj, onChange);
+    createAdjustmentPanel(container, adj, onChange, onPickStart);
   };
 
   const title = document.createElement("h2");
@@ -309,7 +302,7 @@ export function createAdjustmentPanel(
     );
   }
 
-  addIsolationControls(container, adj, onChange, rebuildPanel);
+  addIsolationControls(container, adj, onChange, rebuildPanel, onPickStart);
 
   const reset = document.createElement("button");
   reset.type = "button";

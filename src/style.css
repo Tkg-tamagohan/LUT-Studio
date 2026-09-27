@@ -144,6 +144,11 @@ body {
   border-radius: 4px;
 }
 
+/* 「画像から拾う」モード中はキャンバスをスポイトカーソルにする */
+body.picking .preview-canvas {
+  cursor: crosshair;
+}
+
 .preview-card figcaption {
   font-size: 0.75rem;
   color: var(--fg-dim);

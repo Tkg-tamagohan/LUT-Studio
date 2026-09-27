@@ -1,6 +1,7 @@
 import {
   bakeLut,
   compileAdjustments,
+  hueDegrees,
   neutralAdjustments,
   type LutData,
 } from "./engine";
@@ -50,12 +51,53 @@ function renderAll(): void {
   for (const { renderer } of entries.values()) renderer?.render();
 }
 
+function updateStatus(): void {
+  status.textContent = `${entries.size} 枚読み込み済み`;
+}
+
+// 「画像から拾う」で一度だけ発火する色相選択モード。
+// 拾うのはLUT適用後ではなく元画像の画素（脱色済みプレビューでは色相が拾えないため）。
+let pickCallback: ((hueDeg: number) => void) | null = null;
+const sampler = document.createElement("canvas");
+const samplerCtx = sampler.getContext("2d", { willReadFrequently: true });
+
+function requestHuePick(onPicked: (hueDeg: number) => void): void {
+  pickCallback = onPicked;
+  document.body.classList.add("picking");
+  status.textContent = "拾いたい色を画像上でクリック（Escでキャンセル）";
+}
+
+function endPick(): void {
+  pickCallback = null;
+  document.body.classList.remove("picking");
+  updateStatus();
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && pickCallback) endPick();
+});
+
+function pickFromEntry(e: MouseEvent, canvas: HTMLCanvasElement, entry: ImageEntry): void {
+  if (!pickCallback || !samplerCtx) return;
+  const rect = canvas.getBoundingClientRect();
+  const bx = Math.max(0, Math.min(entry.width - 1, Math.floor(((e.clientX - rect.left) / rect.width) * entry.width)));
+  const by = Math.max(0, Math.min(entry.height - 1, Math.floor(((e.clientY - rect.top) / rect.height) * entry.height)));
+  sampler.width = entry.width;
+  sampler.height = entry.height;
+  samplerCtx.drawImage(entry.bitmap, 0, 0);
+  const d = samplerCtx.getImageData(bx, by, 1, 1).data;
+  const cb = pickCallback;
+  endPick();
+  cb(hueDegrees(d[0] / 255, d[1] / 255, d[2] / 255));
+}
+
 function addImage(entry: ImageEntry): void {
   const figure = document.createElement("figure");
   figure.className = "preview-card";
   const canvas = document.createElement("canvas");
   canvas.className = "preview-canvas";
   canvas.style.aspectRatio = `${entry.width} / ${entry.height}`;
+  canvas.addEventListener("click", (e) => pickFromEntry(e, canvas, entry));
   const caption = document.createElement("figcaption");
   caption.textContent = entry.name;
   figure.append(canvas, caption);
@@ -152,4 +194,4 @@ tileSize.addEventListener("input", () => {
 });
 
 const panel = document.getElementById("panel")!;
-createAdjustmentPanel(panel, adjustments, scheduleRebake);
+createAdjustmentPanel(panel, adjustments, scheduleRebake, requestHuePick);
