@@ -11,6 +11,11 @@ export interface ImageEntry {
   /** ビットマップの寸法（縮小後）。 */
   width: number;
   height: number;
+  /**
+   * 読み込み元のファイル。プレビュー用に縮小済みの bitmap とは別に保持し、
+   * 書き出し時にフル解像度で再デコードするために使う（仕様決定G）。
+   */
+  file: File;
 }
 
 /** プレビュー画像の最大辺長。これを超える画像は読み込み時に縮小する。 */
@@ -61,7 +66,14 @@ async function loadOne(file: File): Promise<ImageEntry | null> {
     });
     original.close();
   }
-  return { id: `img-${nextId++}`, name: file.name, bitmap, width, height };
+  return {
+    id: `img-${nextId++}`,
+    name: file.name,
+    bitmap,
+    width,
+    height,
+    file,
+  };
 }
 
 /** 画像ファイル群を読み込む。非画像・デコード失敗は skipped に入れて続行する。 */

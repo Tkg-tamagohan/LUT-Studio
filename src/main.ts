@@ -1,8 +1,15 @@
 import {
+  applyLutToRgba,
+  applyPreset,
   bakeLut,
   compileAdjustments,
   hueDegrees,
+  lutToCube,
+  lutToHald,
+  lutToReShade,
   neutralAdjustments,
+  presetFromJson,
+  presetToJson,
   type LutData,
 } from "./engine";
 import {
@@ -11,10 +18,23 @@ import {
   type ImageEntry,
   type PreviewRenderer,
 } from "./preview";
-import { createAdjustmentPanel } from "./ui/panel";
+import {
+  createAdjustmentPanel,
+  type LutExportFormat,
+} from "./ui/panel";
+import {
+  canvasToPngBlob,
+  downloadBlob,
+  rgbaToPngBlob,
+  uniqueImageExportName,
+} from "./ui/export";
 
 /** プレビュー用LUTのサイズ。書き出しPNGアトラスと同じ64（仕様決定D）。 */
 const PREVIEW_LUT_SIZE = 64;
+/** `.cube` 書き出しのLUTサイズ（仕様決定D）。 */
+const CUBE_LUT_SIZE = 33;
+/** LUT適用済み画像の書き出しに使うLUTサイズ。プレビューと同じ64で見た目を揃える。 */
+const IMAGE_LUT_SIZE = 64;
 
 const adjustments = neutralAdjustments();
 let lut: LutData = bakeLut(
@@ -53,6 +73,105 @@ function renderAll(): void {
 
 function updateStatus(): void {
   status.textContent = `${entries.size} 枚読み込み済み`;
+}
+
+/**
+ * 書き出し用にLUTを焼く。マスクプレビュー（選択範囲の可視化）は
+ * 書き出し物に含めないため、プレビュー用lutとは別にクリーンな状態で焼き直す。
+ */
+function bakeExportLut(size: number): LutData {
+  return bakeLut(size, compileAdjustments(adjustments));
+}
+
+function baseName(filename: string): string {
+  return filename.replace(/\.[^.]+$/, "") || "image";
+}
+
+async function exportPngLut(kind: "hald" | "reshade"): Promise<void> {
+  const exportLut = bakeExportLut(IMAGE_LUT_SIZE);
+  const img = kind === "hald" ? lutToHald(exportLut) : lutToReShade(exportLut);
+  const blob = await rgbaToPngBlob(img);
+  const name = `lut-studio-${kind}.png`;
+  downloadBlob(blob, name);
+  status.textContent = `LUTを書き出しました: ${name}`;
+}
+
+function exportLutFile(format: LutExportFormat): void {
+  if (format === "cube") {
+    const cube = lutToCube(bakeExportLut(CUBE_LUT_SIZE));
+    downloadBlob(new Blob([cube], { type: "text/plain" }), "lut-studio.cube");
+    status.textContent = "LUTを書き出しました: lut-studio.cube";
+    return;
+  }
+  void exportPngLut(format);
+}
+
+/** 書き出し済みの画像ファイル名。同名画像があっても出力名が衝突しないよう管理する。 */
+const exportedImageNames = new Set<string>();
+
+/** LUTを適用した画像を元ファイルの解像度でPNG化して保存する（仕様決定G）。 */
+async function exportImage(
+  entry: ImageEntry,
+  exportLut: LutData,
+): Promise<string> {
+  // プレビュー用に縮小済みのbitmapではなく、元ファイルからフル解像度で再デコードする
+  const bitmap = await createImageBitmap(entry.file);
+  const width = bitmap.width;
+  const height = bitmap.height;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("canvasコンテキストを取得できません");
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    {
+      const pixels = ctx.getImageData(0, 0, width, height);
+      applyLutToRgba(exportLut, pixels.data);
+      ctx.putImageData(pixels, 0, 0);
+    }
+    const blob = await canvasToPngBlob(canvas);
+    // エンコード済みのcanvasバッファはすぐ手放し、一括書き出し時のピークを抑える
+    canvas.width = 0;
+    canvas.height = 0;
+    const filename = uniqueImageExportName(baseName(entry.name), exportedImageNames);
+    downloadBlob(blob, filename);
+    return filename;
+  } finally {
+    bitmap.close();
+  }
+}
+
+async function exportAllImages(): Promise<void> {
+  if (entries.size === 0) {
+    status.textContent = "書き出す画像がありません";
+    return;
+  }
+  const exportLut = bakeExportLut(IMAGE_LUT_SIZE);
+  let done = 0;
+  let failed = 0;
+  for (const { entry } of entries.values()) {
+    try {
+      await exportImage(entry, exportLut);
+      done++;
+    } catch {
+      failed++;
+    }
+    status.textContent = `画像を書き出し中… ${done + failed}/${entries.size}`;
+  }
+  status.textContent =
+    failed > 0
+      ? `${done} 枚書き出し / ${failed} 件失敗`
+      : `${done} 枚の画像を書き出しました`;
+}
+
+function savePresetFile(): void {
+  const blob = new Blob([presetToJson(adjustments)], {
+    type: "application/json",
+  });
+  downloadBlob(blob, "lut-studio-preset.json");
+  status.textContent = "プリセットを保存しました: lut-studio-preset.json";
 }
 
 // 「画像から拾う」で一度だけ発火する色相選択モード。
@@ -99,7 +218,27 @@ function addImage(entry: ImageEntry): void {
   canvas.style.aspectRatio = `${entry.width} / ${entry.height}`;
   canvas.addEventListener("click", (e) => pickFromEntry(e, canvas, entry));
   const caption = document.createElement("figcaption");
-  caption.textContent = entry.name;
+  const captionRow = document.createElement("div");
+  captionRow.className = "caption-row";
+  const captionName = document.createElement("span");
+  captionName.className = "caption-name";
+  captionName.textContent = entry.name;
+  const exportButton = document.createElement("button");
+  exportButton.type = "button";
+  exportButton.textContent = "PNG";
+  exportButton.title = "LUT適用済みをPNGで書き出し";
+  exportButton.addEventListener("click", () => {
+    status.textContent = `${entry.name} を書き出し中…`;
+    void exportImage(entry, bakeExportLut(IMAGE_LUT_SIZE))
+      .then((filename) => {
+        status.textContent = `書き出しました: ${filename}`;
+      })
+      .catch(() => {
+        status.textContent = `書き出しに失敗しました: ${entry.name}`;
+      });
+  });
+  captionRow.append(captionName, exportButton);
+  caption.appendChild(captionRow);
   figure.append(canvas, caption);
   grid.appendChild(figure);
 
@@ -123,7 +262,7 @@ function addImage(entry: ImageEntry): void {
     canvas.addEventListener("pointercancel", release);
     canvas.addEventListener("pointerleave", release);
   } else {
-    caption.textContent = `${entry.name}（WebGL非対応のためプレビュー不可）`;
+    captionName.textContent = `${entry.name}（WebGL非対応のためプレビュー不可）`;
   }
   entries.set(entry.id, { entry, renderer });
 }
@@ -211,10 +350,30 @@ tileSize.addEventListener("input", () => {
 });
 window.addEventListener("resize", () => applyTileSize(Number(tileSize.value)));
 
-const panel = document.getElementById("panel")!;
-createAdjustmentPanel(panel, adjustments, scheduleRebake, requestHuePick);
+async function loadPresetFile(file: File): Promise<void> {
+  try {
+    const preset = presetFromJson(await file.text());
+    applyPreset(adjustments, preset);
+    rebuildPanel();
+    scheduleRebake();
+    status.textContent = `プリセットを読み込みました: ${file.name}`;
+  } catch (e) {
+    status.textContent = `プリセットの読み込みに失敗: ${
+      e instanceof Error ? e.message : String(e)
+    }`;
+  }
+}
 
-const hint = document.createElement("p");
-hint.className = "hint";
-hint.textContent = "プレビュー画像を押している間は原画を表示します";
-panel.appendChild(hint);
+const panel = document.getElementById("panel")!;
+const rebuildPanel = createAdjustmentPanel(
+  panel,
+  adjustments,
+  scheduleRebake,
+  requestHuePick,
+  {
+    exportLut: exportLutFile,
+    exportImages: () => void exportAllImages(),
+    savePreset: savePresetFile,
+    loadPreset: (file) => void loadPresetFile(file),
+  },
+);

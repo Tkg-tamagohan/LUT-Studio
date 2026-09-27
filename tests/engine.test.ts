@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyAdjustments,
+  applyLutToRgba,
   bakeLut,
   compileAdjustments,
   createNeutralLut,
@@ -436,5 +437,59 @@ describe("LUT-09 ReShade形式を外部規約で読み戻すと元LUTと一致�
       }
     }
     expect(mismatches, `最初の不一致画素: ${firstMismatch}`).toBe(0);
+  });
+});
+
+describe("LUT-10 画素へのLUT適用（applyLutToRgba）", () => {
+  it("中立LUTは画素をほぼ変えずアルファを保持する", () => {
+    const lut = createNeutralLut(64);
+    const pixels = new Uint8ClampedArray([
+      0, 0, 0, 128, 255, 255, 255, 200, 30, 200, 90, 64,
+    ]);
+    applyLutToRgba(lut, pixels);
+    // 三線形補間→8bit往復の丸め誤差は±1まで
+    expect(Math.abs(pixels[0] - 0)).toBeLessThanOrEqual(1);
+    expect(Math.abs(pixels[4] - 255)).toBeLessThanOrEqual(1);
+    expect(Math.abs(pixels[8] - 30)).toBeLessThanOrEqual(1);
+    expect(Math.abs(pixels[9] - 200)).toBeLessThanOrEqual(1);
+    expect(Math.abs(pixels[10] - 90)).toBeLessThanOrEqual(1);
+    // アルファは無変更
+    expect(pixels[3]).toBe(128);
+    expect(pixels[7]).toBe(200);
+    expect(pixels[11]).toBe(64);
+  });
+
+  it("チャネル巡回LUTは画素のチャネルを入れ替える", () => {
+    const lut = permutedLut(64); // out = (b, r, g)
+    const pixels = new Uint8ClampedArray([255, 0, 128, 255]);
+    applyLutToRgba(lut, pixels);
+    expect(pixels[0]).toBe(128); // 元のB
+    expect(pixels[1]).toBe(255); // 元のR
+    expect(pixels[2]).toBe(0); // 元のG
+    expect(pixels[3]).toBe(255);
+  });
+
+  it("格子点の間の色は三線形補間される", () => {
+    // 全チャネルが入力の赤成分を返すLUT（size=2）。最近傍なら128は0か255に丸まる。
+    const lut = bakeLut(2, (r, _g, _b, out) => {
+      out[0] = r;
+      out[1] = r;
+      out[2] = r;
+    });
+    const pixels = new Uint8ClampedArray([128, 0, 0, 255]);
+    applyLutToRgba(lut, pixels);
+    expect(pixels[0]).toBe(128); // r=0.502 の補間値がそのまま出る
+    expect(pixels[1]).toBe(128);
+    expect(pixels[2]).toBe(128);
+  });
+
+  it("調整を焼いたLUTで画素が変換される（彩度-1で脱色）", () => {
+    const adj = { ...neutralAdjustments(), saturation: -1 };
+    const lut = bakeLut(64, compileAdjustments(adj));
+    const pixels = new Uint8ClampedArray([255, 0, 0, 255]);
+    applyLutToRgba(lut, pixels);
+    // 輝度へ脱色されるため全チャネルが近い値になる
+    expect(Math.abs(pixels[0] - pixels[1])).toBeLessThanOrEqual(1);
+    expect(Math.abs(pixels[1] - pixels[2])).toBeLessThanOrEqual(1);
   });
 });

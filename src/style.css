@@ -190,6 +190,13 @@ body.picking .preview-canvas {
 .slider-label {
   font-size: 0.8rem;
   color: var(--fg-dim);
+  /* クリックで既定値へ戻せることを示す */
+  cursor: pointer;
+}
+
+.slider-label:hover {
+  color: var(--fg);
+  text-decoration: underline dotted;
 }
 
 .slider-value {
@@ -278,6 +285,57 @@ button:hover:not(:disabled) {
 button:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* 書き出し・プリセットの操作行 */
+.export-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.7rem;
+}
+
+.export-row select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-surface);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.8rem;
+}
+
+.export-row button,
+#panel > button {
+  font-size: 0.8rem;
+}
+
+#panel > button,
+.export-row + button {
+  width: 100%;
+  margin-bottom: 0.7rem;
+}
+
+/* 画像ごとの書き出しボタン（キャプション内） */
+.caption-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.caption-row .caption-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caption-row button {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.5rem;
+  flex: 0 0 auto;
 }
 
 /* RGBカーブエディタ */
