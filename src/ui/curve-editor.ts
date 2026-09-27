@@ -24,14 +24,31 @@ const MIN_POINTS = 2;
 /** タッチ操作でダブルタップとみなす間隔(ms)。 */
 const DOUBLE_TAP_MS = 350;
 
+/**
+ * <details>の開閉状態。パネル再構築（プリセット読み込み等）でエディタが
+ * 作り直されても開閉を維持するためモジュールに置く。未操作なら画面幅で決める。
+ */
+let curveDetailsOpen: boolean | null = null;
+
 export function createCurveEditor(
   container: HTMLElement,
   adj: AdjustmentSet,
   onChange: () => void,
 ): void {
-  const heading = document.createElement("h3");
-  heading.textContent = "RGBカーブ";
-  container.appendChild(heading);
+  // スマホではパネルのスクロール操作がキャンバスに吸われてカーブが
+  // 意図せず変わるため、detailsで格納する。既定はスマホで畳み、
+  // デスクトップで展開。一度操作したらその状態を維持する。
+  const details = document.createElement("details");
+  details.className = "curve-details";
+  const summary = document.createElement("summary");
+  summary.textContent = "RGBカーブ";
+  details.appendChild(summary);
+  details.open =
+    curveDetailsOpen ?? !window.matchMedia("(max-width: 640px)").matches;
+  details.addEventListener("toggle", () => {
+    curveDetailsOpen = details.open;
+  });
+  container.appendChild(details);
 
   let active: CurveKey = "curveMaster";
 
@@ -51,7 +68,7 @@ export function createCurveEditor(
     channelButtons.set(ch.key, btn);
     channelRow.appendChild(btn);
   }
-  container.appendChild(channelRow);
+  details.appendChild(channelRow);
 
   const syncChannelButtons = () => {
     for (const [key, btn] of channelButtons) {
@@ -62,7 +79,7 @@ export function createCurveEditor(
 
   const canvas = document.createElement("canvas");
   canvas.className = "curve-editor";
-  container.appendChild(canvas);
+  details.appendChild(canvas);
 
   const ctx = canvas.getContext("2d")!;
 
@@ -234,7 +251,7 @@ export function createCurveEditor(
   hint.className = "curve-hint";
   hint.textContent =
     "クリック/タップで追加・ドラッグで移動・ダブルクリック/ダブルタップで削除";
-  container.appendChild(hint);
+  details.appendChild(hint);
 
   const resetCurve = document.createElement("button");
   resetCurve.type = "button";
@@ -245,7 +262,7 @@ export function createCurveEditor(
     draw();
     onChange();
   });
-  container.appendChild(resetCurve);
+  details.appendChild(resetCurve);
 
   const resizeObserver = new ResizeObserver(() => {
     const rect = canvas.getBoundingClientRect();

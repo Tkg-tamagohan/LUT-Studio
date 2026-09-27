@@ -349,7 +349,21 @@ button:disabled {
   flex: 0 0 auto;
 }
 
-/* RGBカーブエディタ：幅はパネルいっぱい。バッファはJS側で表示サイズに合わせる */
+/* RGBカーブエディタ：幅はパネルいっぱい。バッファはJS側で表示サイズに合わせる。
+   格納・展開はdetailsに任せ、summaryをh3相当の見出しに見せる */
+.curve-details {
+  margin: 1.2rem 0 0;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+.curve-details > summary {
+  font-size: 0.85rem;
+  font-weight: bold;
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
 .curve-channels {
   display: flex;
   gap: 0.3rem;
@@ -438,6 +452,16 @@ button:disabled {
   .curve-reset {
     font-size: 0.85rem;
     padding: 0.45rem 1rem;
+  }
+
+  /* 展開したカーブが下ペイン（30dvh）からはみ出さない高さに抑え、
+     縦横比を保つため幅はautoで中央寄せにする */
+  .curve-editor {
+    width: auto;
+    max-width: 100%;
+    height: calc(30dvh - 6rem);
+    min-height: 96px;
+    margin: 0 auto;
   }
 
   #panel {
