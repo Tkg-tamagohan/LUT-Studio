@@ -223,6 +223,30 @@ body {
   padding: 0.2rem 0.6rem;
 }
 
+/* 色から選択する行（カラー入力＋スポイトボタン） */
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--fg-dim);
+  margin-bottom: 0.7rem;
+}
+
+.pick-row input[type="color"] {
+  width: 2.2rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-surface);
+}
+
+.pick-row button {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+}
+
 /* 選択範囲の色相グラデーション（背景は panel.ts が都度設定する） */
 .iso-gradient {
   height: 10px;

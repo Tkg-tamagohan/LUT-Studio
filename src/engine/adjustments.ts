@@ -111,8 +111,8 @@ const LUMA_R = 0.2126;
 const LUMA_G = 0.7152;
 const LUMA_B = 0.0722;
 
-/** RGBから色相（度）を求める。無彩色は0を返す。 */
-function hueDegrees(r: number, g: number, b: number): number {
+/** RGB（各0〜1）から色相（度）を求める。無彩色は0を返す。UIのカラーピッカーでも使う。 */
+export function hueDegrees(r: number, g: number, b: number): number {
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   const d = max - min;

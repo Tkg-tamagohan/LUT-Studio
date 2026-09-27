@@ -1,8 +1,18 @@
 import {
+  hueDegrees,
   isolationMaskAt,
   type AdjustmentSet,
   type IsolationTarget,
 } from "../engine";
+
+// Chromium系の EyeDropper API。画面全体から色を拾える（プレビュー画像の肌色など）。
+declare global {
+  interface Window {
+    EyeDropper?: new () => {
+      open(options?: { signal?: AbortSignal }): Promise<{ sRGBHex: string }>;
+    };
+  }
+}
 
 /**
  * 調整パネル。スライダ操作で AdjustmentSet を直接書き換え、
@@ -80,6 +90,22 @@ function hueToRgb(hDeg: number): [number, number, number] {
 }
 
 const GRADIENT_STOPS = 33;
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const to = (v: number) =>
+    Math.round(Math.min(Math.max(v, 0), 1) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+
+/** "#rrggbb" から色相（度）を求める。彩度・輝度は捨てて色相だけを採用する。 */
+function hexToHue(hex: string): number {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  return hueDegrees(r, g, b);
+}
 
 /**
  * 選択対象が色相環のどこを残すかを示すグラデーション（全周0〜360度）。
@@ -173,8 +199,51 @@ function addIsolationControls(
     refreshers.push(refreshGradient);
     box.appendChild(gradient);
 
+    // 色から色相を選ぶ入力。スウォッチは現在の中心色相の色を示す。
+    const pickRow = document.createElement("div");
+    pickRow.className = "pick-row";
+    const pickLabel = document.createElement("span");
+    pickLabel.textContent = "色から選択";
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.value = rgbToHex(...hueToRgb(target.hue));
+    const applyPickedHue = (hex: string) => {
+      target.hue = Math.round(hexToHue(hex));
+      refreshAll();
+      onChange();
+    };
+    colorInput.addEventListener("input", () => applyPickedHue(colorInput.value));
+    // ダイアログを閉じた時点でスライダ表示も新しい色相へ揃える
+    colorInput.addEventListener("change", () => {
+      colorInput.value = rgbToHex(...hueToRgb(target.hue));
+      rebuildPanel();
+    });
+    pickRow.append(pickLabel, colorInput);
+
+    // 対応環境ではプレビュー画像上から直接スポイトで拾える
+    if (window.EyeDropper) {
+      const eyedrop = document.createElement("button");
+      eyedrop.type = "button";
+      eyedrop.textContent = "画像から拾う";
+      eyedrop.addEventListener("click", () => {
+        void new window.EyeDropper!()
+          .open()
+          .then(({ sRGBHex }) => {
+            applyPickedHue(sRGBHex);
+            rebuildPanel();
+          })
+          // キャンセル時は何もしない
+          .catch(() => {});
+      });
+      pickRow.appendChild(eyedrop);
+    }
+    box.appendChild(pickRow);
+
     box.appendChild(
-      makeSlider("中心色相 (°)", 0, 360, 1, () => target.hue, (v) => (target.hue = v), onChangeAndRefresh),
+      makeSlider("中心色相 (°)", 0, 360, 1, () => target.hue, (v) => (target.hue = v), () => {
+        colorInput.value = rgbToHex(...hueToRgb(target.hue));
+        onChangeAndRefresh();
+      }),
     );
     box.appendChild(
       makeSlider("範囲 (°)", 0, 180, 1, () => target.range, (v) => (target.range = v), onChangeAndRefresh),
