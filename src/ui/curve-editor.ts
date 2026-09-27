@@ -34,7 +34,7 @@ export function createCurveEditor(
   container: HTMLElement,
   adj: AdjustmentSet,
   onChange: () => void,
-): ResizeObserver {
+): () => void {
   // スマホではパネルのスクロール操作がキャンバスに吸われてカーブが
   // 意図せず変わるため、detailsで格納する。既定はスマホで畳み、
   // デスクトップで展開。一度操作したらその状態を維持する。
@@ -61,10 +61,11 @@ export function createCurveEditor(
   const mq = window.matchMedia("(max-width: 640px)");
   setAuto(curveDetailsOpen ?? !mq.matches);
   // ユーザーが一度も開閉していない間は、画面幅が640pxを跨いだら既定に追従する
-  mq.addEventListener("change", () => {
+  const onMqChange = () => {
     if (curveDetailsOpen !== null) return;
     setAuto(!mq.matches);
-  });
+  };
+  mq.addEventListener("change", onMqChange);
   container.appendChild(details);
 
   let active: CurveKey = "curveMaster";
@@ -294,6 +295,9 @@ export function createCurveEditor(
 
   draw();
 
-  // パネル再構築時に呼び出し側でdisconnect()して監視を止められるよう返す
-  return resizeObserver;
+  // パネル再構築時に呼び出し側が実行し、ResizeObserverと画面幅監視を止める
+  return () => {
+    resizeObserver.disconnect();
+    mq.removeEventListener("change", onMqChange);
+  };
 }

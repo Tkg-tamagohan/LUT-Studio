@@ -3,14 +3,20 @@ import {
   applyPreset,
   bakeLut,
   compileAdjustments,
+  detectImageLutLayout,
   hueDegrees,
+  imageToLut,
   lutToCube,
   lutToHald,
   lutToReShade,
   neutralAdjustments,
+  parseCubeLut,
   presetFromJson,
   presetToJson,
+  withBaseLut,
+  type ImportedLut,
   type LutData,
+  type RgbaImage,
 } from "./engine";
 import {
   createRenderer,
@@ -37,6 +43,12 @@ const CUBE_LUT_SIZE = 33;
 const IMAGE_LUT_SIZE = 64;
 
 const adjustments = neutralAdjustments();
+/** 読み込んだ外部LUT（仕様決定R・S）。null のときは中立LUT相当。 */
+let baseLut: ImportedLut | null = null;
+/** ベースLUTセクションとステータスに表示する名前（例: `filmic.cube（33³）`）。 */
+let baseLutLabel: string | null = null;
+/** ベースLUTの適用強度（%）。0 で未適用、100 でフル適用（仕様決定W）。 */
+let lutStrength = 100;
 let lut: LutData = bakeLut(
   PREVIEW_LUT_SIZE,
   compileAdjustments(adjustments),
@@ -58,7 +70,11 @@ function scheduleRebake(): void {
     bakeScheduled = false;
     lut = bakeLut(
       PREVIEW_LUT_SIZE,
-      compileAdjustments(adjustments, { maskPreview }),
+      withBaseLut(
+        baseLut,
+        compileAdjustments(adjustments, { maskPreview }),
+        lutStrength / 100,
+      ),
     );
     for (const { renderer } of entries.values()) {
       renderer?.setLut(lut);
@@ -80,7 +96,10 @@ function updateStatus(): void {
  * 書き出し物に含めないため、プレビュー用lutとは別にクリーンな状態で焼き直す。
  */
 function bakeExportLut(size: number): LutData {
-  return bakeLut(size, compileAdjustments(adjustments));
+  return bakeLut(
+    size,
+    withBaseLut(baseLut, compileAdjustments(adjustments), lutStrength / 100),
+  );
 }
 
 function baseName(filename: string): string {
@@ -239,6 +258,99 @@ async function exportAllImages(): Promise<void> {
       : `${done} 枚の画像を書き出しました`;
 }
 
+/** ベースLUTの適用と表示更新。成功時のみ baseLut を差し替える。 */
+function setBaseLut(imported: ImportedLut, fileName: string): void {
+  baseLut = imported;
+  baseLutLabel = `${fileName}（${imported.lut.size}³）`;
+  scheduleRebake();
+  rebuildPanel();
+  status.textContent = `ベースLUTを読み込みました: ${baseLutLabel}`;
+}
+
+function clearBaseLut(): void {
+  baseLut = null;
+  baseLutLabel = null;
+  // 解除より前に開始した読み込みが完了後に再適用されないよう世代を進める
+  lutLoadGeneration++;
+  scheduleRebake();
+  rebuildPanel();
+  status.textContent = "ベースLUTを解除しました";
+}
+
+/** PNGをデコードしてRGBA8バッファにする。色情報がそのままLUTデータになる。 */
+async function decodeToRgba(file: File): Promise<RgbaImage> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("canvasコンテキストを取得できません");
+    ctx.drawImage(bitmap, 0, 0);
+    const pixels = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+    canvas.width = 0;
+    canvas.height = 0;
+    return { width: pixels.width, height: pixels.height, data: pixels.data };
+  } finally {
+    bitmap.close();
+  }
+}
+
+/**
+ * 読み込み処理の世代番号。デコード待ちの古い読み込みが、後から選んだファイルや
+ * 解除操作を完了時に上書きしないよう、完了時に最新世代だけを適用する。
+ */
+let lutLoadGeneration = 0;
+
+/**
+ * `.cube` またはPNG画像LUTをベースLUTとして読み込む（仕様決定R・T）。
+ * エラー時はメッセージを表示し、現在のベースLUTは維持する。
+ */
+async function loadBaseLutFile(file: File): Promise<void> {
+  const gen = ++lutLoadGeneration;
+  // 新しい読み込みや解除が先に行われていたら、この結果もエラーも捨てる
+  const stale = () => gen !== lutLoadGeneration;
+  try {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".cube")) {
+      const imported = parseCubeLut(await file.text());
+      if (stale()) return;
+      setBaseLut(imported, file.name);
+      return;
+    }
+    if (lower.endsWith(".png") || file.type === "image/png") {
+      let img: RgbaImage;
+      try {
+        img = await decodeToRgba(file);
+      } catch {
+        throw new Error("PNGのデコードに失敗しました");
+      }
+      if (stale()) return;
+      const layout = detectImageLutLayout(img.width, img.height);
+      if (layout === null) {
+        throw new Error(
+          `画像の寸法（${img.width}×${img.height}）がHaldCLUT・ReShadeのいずれの署名にも合いません`,
+        );
+      }
+      setBaseLut(
+        {
+          lut: imageToLut(img, layout),
+          domainMin: [0, 0, 0],
+          domainMax: [1, 1, 1],
+        },
+        file.name,
+      );
+      return;
+    }
+    throw new Error("対応していない形式です（.cube またはPNG画像LUTのみ）");
+  } catch (e) {
+    if (stale()) return;
+    status.textContent = `LUTの読み込みに失敗: ${
+      e instanceof Error ? e.message : String(e)
+    }`;
+  }
+}
+
 function savePresetFile(): void {
   const blob = new Blob([presetToJson(adjustments)], {
     type: "application/json",
@@ -364,14 +476,30 @@ function addImage(entry: ImageEntry): void {
   });
 }
 
+/** 拡張子 `.cube`（大小不問）のみをLUTとして振り分ける（仕様決定T）。 */
+function isCubeFile(file: File): boolean {
+  return file.name.toLowerCase().endsWith(".cube");
+}
+
 async function addFiles(files: Iterable<File>): Promise<void> {
-  const { entries: loaded, skipped } = await loadImageFiles(files);
-  for (const entry of loaded) addImage(entry);
-  const parts = [`${entries.size} 枚読み込み済み`];
-  if (skipped.length > 0) {
-    parts.push(`${skipped.length} 件スキップ: ${skipped.join(", ")}`);
+  const list = Array.from(files);
+  const cubeFiles = list.filter(isCubeFile);
+  const imageFiles = list.filter((f) => !isCubeFile(f));
+  const parts: string[] = [];
+  if (imageFiles.length > 0) {
+    const { entries: loaded, skipped } = await loadImageFiles(imageFiles);
+    for (const entry of loaded) addImage(entry);
+    parts.push(`${entries.size} 枚読み込み済み`);
+    if (skipped.length > 0) {
+      parts.push(`${skipped.length} 件スキップ: ${skipped.join(", ")}`);
+    }
   }
-  status.textContent = parts.join(" / ");
+  // 複数の .cube が混在する場合は最後のものが有効（後勝ち）
+  for (const file of cubeFiles) {
+    await loadBaseLutFile(file);
+    parts.push(status.textContent ?? "");
+  }
+  if (parts.length > 0) status.textContent = parts.join(" / ");
 }
 
 fileInput.addEventListener("change", () => {
@@ -475,5 +603,13 @@ const rebuildPanel = createAdjustmentPanel(
     exportImages: () => void exportAllImages(),
     savePreset: savePresetFile,
     loadPreset: (file) => void loadPresetFile(file),
+    loadLut: (file) => void loadBaseLutFile(file),
+    clearLut: clearBaseLut,
+    baseLutLabel: () => baseLutLabel,
+    lutStrength: () => lutStrength,
+    setLutStrength: (v) => {
+      lutStrength = Math.min(100, Math.max(0, Math.round(v)));
+      scheduleRebake();
+    },
   },
 );

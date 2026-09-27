@@ -319,6 +319,17 @@ button:disabled {
   margin-bottom: 0.7rem;
 }
 
+/* ベースLUTの読み込み済み表示（ファイル名は省略可） */
+.base-lut-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 画像ごとの書き出しボタン（キャプション内） */
 .caption-row {
   display: flex;
@@ -487,9 +498,10 @@ button:disabled {
     overscroll-behavior: contain;
   }
 
-  /* LUT書き出し（.cube / HaldCLUT / ReShade）はスマホ版では出さない。
-     画像PNG書き出しとプリセットは残す。 */
-  .lut-export {
+  /* LUT書き出し（.cube / HaldCLUT / ReShade）とベースLUT読み込みは
+     スマホ版では出さない。画像PNG書き出しとプリセットは残す。 */
+  .lut-export,
+  .lut-import {
     display: none;
   }
 }

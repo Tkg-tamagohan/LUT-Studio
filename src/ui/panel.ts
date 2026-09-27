@@ -13,12 +13,21 @@ type PickFromImage = (onPicked: (hueDeg: number) => void) => void;
 /** 書き出すLUTの形式（仕様決定A・J）。 */
 export type LutExportFormat = "cube" | "hald" | "reshade";
 
-/** パネルから呼び出す書き出し・プリセット操作。実体は main.ts が持つ。 */
+/** パネルから呼び出す書き出し・プリセット・ベースLUT操作。実体は main.ts が持つ。 */
 export interface PanelActions {
   exportLut(format: LutExportFormat): void;
   exportImages(): void;
   savePreset(): void;
   loadPreset(file: File): void;
+  /** `.cube` またはPNG画像LUTをベースLUTとして読み込む（仕様決定T）。 */
+  loadLut(file: File): void;
+  /** ベースLUTを解除して中立LUTに戻す（仕様決定U）。 */
+  clearLut(): void;
+  /** 現在のベースLUTの表示名（例: `filmic.cube（33³）`）。未読み込みは null。 */
+  baseLutLabel(): string | null;
+  /** ベースLUTの適用強度（0〜100%、既定100）（仕様決定W）。 */
+  lutStrength(): number;
+  setLutStrength(percent: number): void;
 }
 
 /**
@@ -305,12 +314,13 @@ function addIsolationControls(
 }
 
 /** リフト・ガンマ・ゲイン。チャネル別に小さいスライダを並べる。
- *  9本あるため、スマホの狭い下ペインではdetailsで格納する。 */
+ *  9本あるため、スマホの狭い下ペインではdetailsで格納する。
+ *  戻り値は画面幅監視を解除するティアダウン（パネル再構築時に呼ぶ）。 */
 function addLggControls(
   container: HTMLElement,
   adj: AdjustmentSet,
   onChange: () => void,
-): void {
+): () => void {
   const details = document.createElement("details");
   details.className = "panel-details";
   const summary = document.createElement("summary");
@@ -334,10 +344,11 @@ function addLggControls(
   const mq = window.matchMedia("(max-width: 640px)");
   setAuto(lggDetailsOpen ?? !mq.matches);
   // ユーザーが一度も開閉していない間は、画面幅が640pxを跨いだら既定に追従する
-  mq.addEventListener("change", () => {
+  const onMqChange = () => {
     if (lggDetailsOpen !== null) return;
     setAuto(!mq.matches);
-  });
+  };
+  mq.addEventListener("change", onMqChange);
   container.appendChild(details);
 
   const groups: {
@@ -370,6 +381,73 @@ function addLggControls(
       );
     }
   }
+
+  return () => mq.removeEventListener("change", onMqChange);
+}
+
+/**
+ * ベースLUTの読み込みと解除（仕様決定T・U）。
+ * モバイルではPC作業向け機能のためセクションごと非表示にする（仕様決定V）。
+ */
+function addBaseLutControls(
+  container: HTMLElement,
+  actions: PanelActions,
+): void {
+  const section = document.createElement("div");
+  section.className = "lut-import";
+
+  const heading = document.createElement("h3");
+  heading.textContent = "ベースLUT";
+  section.appendChild(heading);
+
+  const row = document.createElement("div");
+  row.className = "export-row";
+  const load = document.createElement("button");
+  load.type = "button";
+  load.textContent = "LUTを読み込み…";
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".cube,.png,image/png";
+  input.hidden = true;
+  input.addEventListener("change", () => {
+    if (input.files?.[0]) actions.loadLut(input.files[0]);
+    input.value = "";
+  });
+  load.addEventListener("click", () => input.click());
+  row.append(load, input);
+  section.appendChild(row);
+
+  const label = actions.baseLutLabel();
+  if (label !== null) {
+    const current = document.createElement("div");
+    current.className = "export-row";
+    const name = document.createElement("span");
+    name.className = "base-lut-name";
+    name.textContent = label;
+    name.title = label;
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.textContent = "解除";
+    clear.addEventListener("click", () => actions.clearLut());
+    current.append(name, clear);
+    section.appendChild(current);
+
+    // 読み込み済みの間だけ適用強度スライダーを出す（仕様決定W）
+    section.appendChild(
+      makeSlider(
+        "適用強度 (%)",
+        0,
+        100,
+        1,
+        100,
+        () => actions.lutStrength(),
+        (v) => actions.setLutStrength(v),
+        () => {},
+      ),
+    );
+  }
+
+  container.appendChild(section);
 }
 
 /** LUT書き出しと画像書き出しの操作列（仕様決定A・G・J）。 */
@@ -449,71 +527,85 @@ export function createAdjustmentPanel(
   onPickStart?: PickFromImage,
   actions?: PanelActions,
 ): () => void {
-  // カーブエディタが登録したResizeObserver。再構築で古いDOMを捨てる前に解除する
-  let curveObserver: ResizeObserver | null = null;
+  // 再構築のたびに古いDOMを捨てるが、捨てる前に各エディタが登録した
+  // ResizeObserver・画面幅監視を解除しないと監視が蓄積するため、
+  // 現在のパネルのティアダウンを保持して必ず実行する。
+  let teardown: () => void = () => {};
   const rebuildPanel = () => {
-    curveObserver?.disconnect();
+    teardown();
     container.replaceChildren();
-    createAdjustmentPanel(container, adj, onChange, onPickStart, actions);
+    teardown = build();
   };
 
-  const title = document.createElement("h2");
-  title.textContent = "調整";
-  container.appendChild(title);
+  const build = (): (() => void) => {
+    const disposers: Array<() => void> = [];
 
-  for (const spec of BASIC_SLIDERS) {
-    container.appendChild(
-      makeSlider(
-        spec.label,
-        spec.min,
-        spec.max,
-        spec.step,
-        0,
-        () => adj[spec.key],
-        (v) => (adj[spec.key] = v),
-        onChange,
-      ),
-    );
-  }
+    const title = document.createElement("h2");
+    title.textContent = "調整";
+    container.appendChild(title);
 
-  addLggControls(container, adj, onChange);
+    for (const spec of BASIC_SLIDERS) {
+      container.appendChild(
+        makeSlider(
+          spec.label,
+          spec.min,
+          spec.max,
+          spec.step,
+          0,
+          () => adj[spec.key],
+          (v) => (adj[spec.key] = v),
+          onChange,
+        ),
+      );
+    }
 
-  curveObserver = createCurveEditor(container, adj, onChange);
+    disposers.push(addLggControls(container, adj, onChange));
 
-  addIsolationControls(container, adj, onChange, rebuildPanel, onPickStart);
+    disposers.push(createCurveEditor(container, adj, onChange));
 
-  if (actions) {
-    addExportControls(container, actions);
-    addPresetControls(container, actions);
-  }
+    addIsolationControls(container, adj, onChange, rebuildPanel, onPickStart);
 
-  const reset = document.createElement("button");
-  reset.type = "button";
-  reset.textContent = "リセット";
-  reset.addEventListener("click", () => {
-    for (const spec of BASIC_SLIDERS) adj[spec.key] = 0;
-    adj.curveMaster = IDENTITY_CURVE.map((p) => ({ ...p }));
-    adj.curveR = IDENTITY_CURVE.map((p) => ({ ...p }));
-    adj.curveG = IDENTITY_CURVE.map((p) => ({ ...p }));
-    adj.curveB = IDENTITY_CURVE.map((p) => ({ ...p }));
-    adj.lift = [0, 0, 0];
-    adj.gamma = [1, 1, 1];
-    adj.gain = [1, 1, 1];
-    adj.isolation = {
-      enabled: false,
-      strength: 1,
-      targets: [newIsolationTarget()],
+    if (actions) {
+      // ベースLUTはアイソレーション系と書き出しの間に置く（lut-import-design.md）
+      addBaseLutControls(container, actions);
+      addExportControls(container, actions);
+      addPresetControls(container, actions);
+    }
+
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.textContent = "リセット";
+    reset.addEventListener("click", () => {
+      for (const spec of BASIC_SLIDERS) adj[spec.key] = 0;
+      adj.curveMaster = IDENTITY_CURVE.map((p) => ({ ...p }));
+      adj.curveR = IDENTITY_CURVE.map((p) => ({ ...p }));
+      adj.curveG = IDENTITY_CURVE.map((p) => ({ ...p }));
+      adj.curveB = IDENTITY_CURVE.map((p) => ({ ...p }));
+      adj.lift = [0, 0, 0];
+      adj.gamma = [1, 1, 1];
+      adj.gain = [1, 1, 1];
+      adj.isolation = {
+        enabled: false,
+        strength: 1,
+        targets: [newIsolationTarget()],
+      };
+      rebuildPanel();
+      onChange();
+    });
+    container.appendChild(reset);
+
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent =
+      "プレビュー画像を押している間は原画を表示します。スライダーのラベルをクリックすると既定値に戻ります";
+    container.appendChild(hint);
+
+    return () => {
+      for (const dispose of disposers) dispose();
     };
-    rebuildPanel();
-    onChange();
-  });
-  container.appendChild(reset);
+  };
 
-  const hint = document.createElement("p");
-  hint.className = "hint";
-  hint.textContent =
-    "プレビュー画像を押している間は原画を表示します。スライダーのラベルをクリックすると既定値に戻ります";
-  container.appendChild(hint);
+  teardown = build();
 
   // プリセット読み込み後など、外部からパネル表示を最新状態へ戻すために返す
   return rebuildPanel;
