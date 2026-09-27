@@ -327,8 +327,19 @@ button:disabled {
 .caption-row .caption-name {
   flex: 1;
   min-width: 0;
+  display: flex;
+}
+
+/* 長いファイル名はベース名側を省略し、拡張子は末尾に残す */
+.caption-stem {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caption-ext {
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 
@@ -338,7 +349,7 @@ button:disabled {
   flex: 0 0 auto;
 }
 
-/* RGBカーブエディタ */
+/* RGBカーブエディタ：幅はパネルいっぱい。バッファはJS側で表示サイズに合わせる */
 .curve-channels {
   display: flex;
   gap: 0.3rem;
@@ -357,6 +368,9 @@ button:disabled {
 
 .curve-editor {
   display: block;
+  width: 100%;
+  aspect-ratio: 248 / 150;
+  height: auto;
   border-radius: 4px;
   cursor: crosshair;
   touch-action: none;
@@ -416,7 +430,14 @@ button:disabled {
   }
 
   #grid {
-    justify-content: flex-start;
+    justify-content: center;
+  }
+
+  /* タッチでも押しやすいようカーブ周辺のボタンを広げる */
+  .curve-channels button,
+  .curve-reset {
+    font-size: 0.85rem;
+    padding: 0.45rem 1rem;
   }
 
   #panel {

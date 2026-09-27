@@ -222,7 +222,19 @@ function addImage(entry: ImageEntry): void {
   captionRow.className = "caption-row";
   const captionName = document.createElement("span");
   captionName.className = "caption-name";
-  captionName.textContent = entry.name;
+  // CSSのellipsisが末尾を切るため、拡張子を別要素に分けて末尾に残す
+  const dotIndex = entry.name.lastIndexOf(".");
+  const captionStem = document.createElement("span");
+  captionStem.className = "caption-stem";
+  captionStem.textContent =
+    dotIndex > 0 ? entry.name.slice(0, dotIndex) : entry.name;
+  captionName.appendChild(captionStem);
+  if (dotIndex > 0) {
+    const captionExt = document.createElement("span");
+    captionExt.className = "caption-ext";
+    captionExt.textContent = entry.name.slice(dotIndex);
+    captionName.appendChild(captionExt);
+  }
   const exportButton = document.createElement("button");
   exportButton.type = "button";
   exportButton.textContent = "PNG";
@@ -341,6 +353,9 @@ const applyTileSize = (pct: number) => {
 const savedTile = Number(localStorage.getItem(TILE_KEY));
 if (savedTile >= 15 && savedTile <= 90) {
   tileSize.value = String(savedTile);
+} else if (window.matchMedia("(max-width: 640px)").matches) {
+  // スマホ版では1枚ずつ大きく見る用途を優先し、既定を最大(90%)とする
+  tileSize.value = "90";
 }
 applyTileSize(Number(tileSize.value));
 tileSize.addEventListener("input", () => {

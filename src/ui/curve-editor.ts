@@ -17,10 +17,12 @@ const CHANNELS: { key: CurveKey; label: string }[] = [
 const WIDTH = 248;
 const HEIGHT = 150;
 const PAD = 10;
-/** 制御点を拾う半径(px)。 */
-const HIT_RADIUS = 8;
+/** 制御点を拾う半径(CSS px)。指での操作も想定して広めに取る。 */
+const HIT_RADIUS = 16;
 /** 制御点の最小数（恒等カーブの両端）。 */
 const MIN_POINTS = 2;
+/** タッチ操作でダブルタップとみなす間隔(ms)。 */
+const DOUBLE_TAP_MS = 350;
 
 export function createCurveEditor(
   container: HTMLElement,
@@ -60,21 +62,22 @@ export function createCurveEditor(
 
   const canvas = document.createElement("canvas");
   canvas.className = "curve-editor";
-  canvas.width = WIDTH * devicePixelRatio;
-  canvas.height = HEIGHT * devicePixelRatio;
-  canvas.style.width = `${WIDTH}px`;
-  canvas.style.height = `${HEIGHT}px`;
   container.appendChild(canvas);
 
   const ctx = canvas.getContext("2d")!;
 
+  // 表示サイズはCSS（パネル幅いっぱい）に任せ、描画は実寸のCSSピクセル座標で行う。
+  // バッファはResizeObserverで表示サイズ×dprに張り直す。
+  let cssW = WIDTH;
+  let cssH = HEIGHT;
+
   const toPx = (p: CurvePoint): [number, number] => [
-    PAD + p.x * (WIDTH - PAD * 2),
-    HEIGHT - PAD - p.y * (HEIGHT - PAD * 2),
+    PAD + p.x * (cssW - PAD * 2),
+    cssH - PAD - p.y * (cssH - PAD * 2),
   ];
   const toCurve = (px: number, py: number): CurvePoint => ({
-    x: Math.min(1, Math.max(0, (px - PAD) / (WIDTH - PAD * 2))),
-    y: Math.min(1, Math.max(0, (HEIGHT - PAD - py) / (HEIGHT - PAD * 2))),
+    x: Math.min(1, Math.max(0, (px - PAD) / (cssW - PAD * 2))),
+    y: Math.min(1, Math.max(0, (cssH - PAD - py) / (cssH - PAD * 2))),
   });
 
   function points(): CurvePoint[] {
@@ -88,28 +91,28 @@ export function createCurveEditor(
     const border = css.getPropertyValue("--border").trim() || "#333";
 
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-    ctx.clearRect(0, 0, WIDTH, HEIGHT);
+    ctx.clearRect(0, 0, cssW, cssH);
 
     // グリッド（4分割）と外枠
     ctx.strokeStyle = border;
     ctx.lineWidth = 1;
-    ctx.strokeRect(PAD, PAD, WIDTH - PAD * 2, HEIGHT - PAD * 2);
+    ctx.strokeRect(PAD, PAD, cssW - PAD * 2, cssH - PAD * 2);
     ctx.beginPath();
     for (let i = 1; i < 4; i++) {
-      const x = PAD + ((WIDTH - PAD * 2) * i) / 4;
-      const y = PAD + ((HEIGHT - PAD * 2) * i) / 4;
+      const x = PAD + ((cssW - PAD * 2) * i) / 4;
+      const y = PAD + ((cssH - PAD * 2) * i) / 4;
       ctx.moveTo(x, PAD);
-      ctx.lineTo(x, HEIGHT - PAD);
+      ctx.lineTo(x, cssH - PAD);
       ctx.moveTo(PAD, y);
-      ctx.lineTo(WIDTH - PAD, y);
+      ctx.lineTo(cssW - PAD, y);
     }
     ctx.stroke();
 
     // 恒等線（対角線）を薄く引く
     ctx.strokeStyle = dim;
     ctx.beginPath();
-    ctx.moveTo(PAD, HEIGHT - PAD);
-    ctx.lineTo(WIDTH - PAD, PAD);
+    ctx.moveTo(PAD, cssH - PAD);
+    ctx.lineTo(cssW - PAD, PAD);
     ctx.stroke();
 
     // カーブ本体（制御点をx順に繋ぐ区分線形）
@@ -128,7 +131,7 @@ export function createCurveEditor(
     for (const p of sorted) {
       const [x, y] = toPx(p);
       ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
       ctx.fillStyle = fg;
       ctx.fill();
       ctx.strokeStyle = border;
@@ -158,9 +161,47 @@ export function createCurveEditor(
   };
 
   let dragging = -1;
+  let lastTap = { time: 0, x: 0, y: 0 };
 
-  // window リスナーはドラッグ中だけ登録する（パネル再作成時に残らないよう）
-  const onMove = (e: MouseEvent) => {
+  // ポインターイベントでマウスとタッチを統一的に扱う。
+  // setPointerCapture により指・カーソルがキャンバス外へ出ても追従する。
+  canvas.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !e.isPrimary) return;
+    const [px, py] = canvasPos(e);
+    const idx = hitIndex(px, py);
+    canvas.setPointerCapture(e.pointerId);
+
+    // タッチではdblclickが発火しにくいため、制御点上の連続2タップを削除とみなす
+    const now = performance.now();
+    const isDoubleTap =
+      e.pointerType === "touch" &&
+      now - lastTap.time < DOUBLE_TAP_MS &&
+      Math.hypot(px - lastTap.x, py - lastTap.y) <= HIT_RADIUS;
+    lastTap = { time: now, x: px, y: py };
+    if (isDoubleTap && idx >= 0 && points().length > MIN_POINTS) {
+      points().splice(idx, 1);
+      lastTap.time = 0;
+      draw();
+      onChange();
+      return;
+    }
+
+    if (idx >= 0) {
+      dragging = idx;
+    } else {
+      // 空白をタップで制御点を追加し、そのままドラッグ継続
+      const p = toCurve(px, py);
+      const pts = points();
+      pts.push(p);
+      pts.sort((a, b) => a.x - b.x);
+      dragging = pts.indexOf(p);
+      draw();
+      onChange();
+    }
+    e.preventDefault();
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
     if (dragging < 0) return;
     const [px, py] = canvasPos(e);
     const p = toCurve(px, py);
@@ -171,33 +212,13 @@ export function createCurveEditor(
     dragging = pts.indexOf(p);
     draw();
     onChange();
-  };
-
-  const onUp = () => {
-    dragging = -1;
-    window.removeEventListener("mousemove", onMove);
-    window.removeEventListener("mouseup", onUp);
-  };
-
-  canvas.addEventListener("mousedown", (e) => {
-    const [px, py] = canvasPos(e);
-    const idx = hitIndex(px, py);
-    if (idx >= 0) {
-      dragging = idx;
-    } else {
-      // 空白をクリックで制御点を追加し、そのままドラッグ継続
-      const p = toCurve(px, py);
-      const pts = points();
-      pts.push(p);
-      pts.sort((a, b) => a.x - b.x);
-      dragging = pts.indexOf(p);
-      draw();
-      onChange();
-    }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    e.preventDefault();
   });
+
+  const endDrag = () => {
+    dragging = -1;
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
 
   canvas.addEventListener("dblclick", (e) => {
     const [px, py] = canvasPos(e);
@@ -211,7 +232,8 @@ export function createCurveEditor(
 
   const hint = document.createElement("p");
   hint.className = "curve-hint";
-  hint.textContent = "クリックで追加・ドラッグで移動・ダブルクリックで削除";
+  hint.textContent =
+    "クリック/タップで追加・ドラッグで移動・ダブルクリック/ダブルタップで削除";
   container.appendChild(hint);
 
   const resetCurve = document.createElement("button");
@@ -224,6 +246,17 @@ export function createCurveEditor(
     onChange();
   });
   container.appendChild(resetCurve);
+
+  const resizeObserver = new ResizeObserver(() => {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0) return;
+    cssW = rect.width;
+    cssH = rect.height;
+    canvas.width = Math.round(cssW * devicePixelRatio);
+    canvas.height = Math.round(cssH * devicePixelRatio);
+    draw();
+  });
+  resizeObserver.observe(canvas);
 
   draw();
 }
