@@ -1,0 +1,169 @@
+# 既存LUT読み込み 詳細設計
+
+要件定義書の F8（既存LUT読み込み）の詳細設計。
+仕様判断は `decision-records.md` の R〜V を参照する。
+テスト項目は `lut-import-test-spec.md` を参照する。
+
+## 目的とスコープ
+
+外部ソフトウェアで作られたLUTを読み込み、プレビューへの適用、調整との合成、別形式への書き出しを可能にする。
+これにより LUT-Studio は「LUT作成」に加えて「形式変換」と「既存LUTへの追調整」にも使える。
+
+対象とするのは次の三形式である。
+いずれも自前の書き出しと対になるため、往復の一致性を保証しやすい。
+
+| 形式 | 格納先 | 精度 | 用途 |
+|------|--------|------|------|
+| `.cube` | テキスト | float | 業界標準の相互形式。DaVinci Resolve、Adobe系、OBSのLUTと交換できる |
+| PNG（HaldCLUT） | 正方形画像 | 8bit | 自前のPNG書き出しとの往復。ImageMagick系のLUT配布 |
+| PNG（ReShade） | 横長画像 | 8bit | ゲーム向けLUT配布で最も流通する画像形式 |
+
+対象外とするものは決定Rに記録する。
+代表的なものを挙げると、1Dだけの `.cube`、`.3dl`、`.look`、`.csp`、ICCプロファイル、レイアウト署名に合わないPNG、EXRやTIFFのLUTは読み込まない。
+
+## `.cube` のパース仕様
+
+テキスト形式であり、ブラウザのデコード機能を必要としないため `src/engine` に純粋関数として置く。
+
+- 行単位で処理する。`#` で始まる行はコメント、空行は読み飛ばす。
+- 前後の空白、連続する空白、タブ区切り、CRLF 改行を許容する。
+- ヘッダキーワードは `TITLE`、`LUT_3D_SIZE`、`LUT_1D_SIZE`、`DOMAIN_MIN`、`DOMAIN_MAX` を認識する。
+- `LUT_3D_SIZE` は必須とし、2以上256以下の整数のみ受け付ける。
+- `LUT_1D_SIZE` を含むファイルはエラーとする。1Dシェーパーを無視して3D部だけ読むと意図と異なる色になるため、読み込めないことを明確にする。
+- `DOMAIN_MIN`、`DOMAIN_MAX` は省略時にそれぞれ (0,0,0)、(1,1,1) とみなす。指定された場合は合成時の入力座標正規化に使う（後述）。
+- `TITLE` は省略可能であり、読み込めばステータス表示の補助に使う。
+- データ行は空白区切りの数値3つで、ちょうど `size³` 行だけを要求する。
+- データ行の並びは `.cube` 規約どおり赤を最速・青を最遅とする。行 k の入力格子は (r=k%size, g=⌊k/size⌋%size, b=⌊k/size²⌋) である。
+- 内部の `LutData` は青を最速とする順序（`lutIndex`）なので、読み込み時に軸順を写し替える。
+- データ値は既存の `clamp01` 方針で 0〜1 にクランプする。非数値トークン、行数の不一致、キーワードの型違いはエラーとする。
+- エラーは `Error` を投げる形とし、メッセージは日本語で原因と行番号を含める。`preset.ts` の `fail()` と同じ作法にする。
+
+```ts
+// src/engine/import-cube.ts
+export function parseCubeLut(text: string): ImportedLut;
+```
+
+`ImportedLut` は `compose-lut.ts` で定義する読み込みLUTの型である。
+
+```ts
+export interface ImportedLut {
+  lut: LutData;
+  /** .cube の TITLE。PNG由来は undefined。 */
+  title?: string;
+  /** 入力ドメインの下限。既定は (0,0,0)。 */
+  domainMin: [number, number, number];
+  /** 入力ドメインの上限。既定は (1,1,1)。 */
+  domainMax: [number, number, number];
+}
+```
+
+## PNG画像LUTの判別とデコード
+
+画像の復号はUI側の責務とする。
+既存の書き出しが「エンジンは `RgbaImage` まで、PNGエンコードはUIがcanvas経由で行う」構成なので、読み込みも対称に「UIがcanvas経由で `RgbaImage` にデコードし、エンジンは `RgbaImage` を解釈する」とする。
+
+レイアウトは寸法の署名で自動判別し、ユーザーに形式を選ばせない。
+
+- 正方形かつ一辺が整数の立方数（L³）で L≥2 → HaldCLUT。LUTサイズは L²。
+- 幅が高さの平方（size²×size）で高さ≥2 → ReShade。LUTサイズは高さに等しい。
+- いずれの署名にも合わない場合はエラー。
+- 両方の署名を満たすのは縮退した 1×1 のみであり、サイズ下限により除外される。
+
+```ts
+// src/engine/import-image.ts
+export type ImageLutLayout = "hald" | "reshade";
+export function detectImageLutLayout(
+  width: number,
+  height: number,
+): ImageLutLayout | null;
+export function imageToLut(img: RgbaImage, layout: ImageLutLayout): LutData;
+```
+
+画素と入力格子の対応は書き出し側（`lutToHald`・`lutToReShade`）とまったく同じ写像を逆向きに使う。
+画素値は 8bit を 0〜1 に割り戻した値であり、量子化誤差 ±1/255 を許容する。
+アルファチャネルは読み捨てる。
+
+ICCプロファイルを持つPNGはブラウザが色変換を施してデコードする可能性がある。
+実運用で配布されるLUT画像はプロファイルを持たないことが多いため、初期実装では既知の制限として扱う。
+
+## ベースLUTとの合成
+
+読み込んだLUTは、中立LUTに代わる「ベースLUT」として保持する。
+状態は `main.ts` の `baseLut: ImportedLut | null` に置く。
+
+合成は「ベースLUT → 調整」の順に行う。
+読み込みLUTの出力を調整パラメータが後から加工する流れであり、LUT→調整値への逆変換はしない（仕様決定E、S）。
+
+```ts
+// src/engine/compose-lut.ts
+export function withBaseLut(
+  base: ImportedLut | null,
+  next: ColorTransform,
+): ColorTransform;
+```
+
+- `base` が null のときは `next` をそのまま返す。既存の焼き付け経路と等価になる。
+- `base` があるときは、入力 c をドメインで正規化した座標 u_i = clamp01((c_i − domainMin_i) / (domainMax_i − domainMin_i)) を求め、既存の `sampleLutTrilinear` で `base.lut` を引き、その結果を `next` に渡す。
+- ドメインが既定値（0〜1）のとき正規化は恒等であり、同じ経路で済む。
+
+焼き付けは既存の `bakeLut` を変えずに `bakeLut(size, withBaseLut(baseLut, compileAdjustments(adj)))` と呼ぶ。
+ベースLUTは元サイズのまま保持し、サイズの違いは三線形補間によるサンプリングが吸収する（仕様決定U）。
+プレビュー（64）、`.cube` 書き出し（33）、PNG書き出し（64）のいずれの経路もこの関数で同じ結果を得られる。
+`maskPreview` は調整側の変換なので、ベースLUTを引いた後の色に対して選択範囲を可視化する動作になる。
+
+## 読み込みの入口とUI
+
+二つの入口を設ける。
+
+- **調整パネルの「ベースLUT」セクション**（主要経路）。
+  「LUTを読み込み…」ボタンを置き、`.cube` とPNGを受け付ける。
+  読み込み済みの間はファイル名とサイズ（例: `filmic.cube（33³）`）を表示し、「解除」ボタンで中立LUTに戻せる。
+  セクションの位置はアイソレーション系と書き出しの間を想定する。
+- **画像ドロップゾーン**。拡張子 `.cube` のファイルのみベースLUTとして振り分ける。
+  PNGは写真と区別がつかないため、ドロップゾーンでは常に画像として扱う。
+
+ファイル名の判定は拡張子の大文字小文字を区別しない。
+複数ファイルの混在ドロップでは `.cube` だけをLUTとして読み、残りは従来どおり画像として処理する。
+`.cube` が複数個ある場合は最後のものが有効になる（後勝ち）。
+
+読み込みの成否とベースLUTの状態は既存の `#status` 行に表示する。
+エラー時は日本語メッセージを表示し、現在のベースLUTは維持する。
+
+モバイル版（画面幅640px以下、仕様決定M）でも読み込みUIは表示する。
+スマホで非表示とするのはLUT書き出しだけであり、読み込みは適用結果をその場で確かめたいモバイルの用途にも有効である。
+レイアウトはパネル下部の他セクションと同じ規則に従う。
+
+## プリセットとの関係
+
+JSONプリセットは調整パラメータのみを保持する（仕様決定E、U）。
+ベースLUTは含めない。プリセットの読み込みはベースLUTを変更しない。
+再編集データを持ち歩きたい場合は、ベースLUTファイルとプリセットを個別に保存する運用になる。
+
+## 形式変換としての往復
+
+`.cube` や PNG を読み込んでそのまま別形式で書き出すと形式変換になる。
+書き出しサイズは既定値（`.cube` は33、PNGは64）を使い、サイズ差は合成時の三線形補間でリサンプルされる。
+同一形式への往復では、`.cube` はfloat精度でほぼ一致し、PNGは8bit量子化の範囲内で一致する。
+
+## ファイル構成
+
+| ファイル | 役割 |
+|----------|------|
+| `src/engine/import-cube.ts` | `.cube` テキストのパースと軸順変換 |
+| `src/engine/import-image.ts` | PNG画像LUTの寸法判別と `RgbaImage` → `LutData` 変換 |
+| `src/engine/compose-lut.ts` | `ImportedLut` 型と `withBaseLut` 合成関数 |
+| `src/engine/index.ts` | 上記の再エクスポート |
+| `src/main.ts` | `baseLut` 状態、読み込み処理、ドロップゾーンの振り分け、焼き付け経路への組み込み |
+| `src/ui/panel.ts` | `PanelActions` への `loadLut`・`clearLut` 追加と「ベースLUT」セクション |
+| `tests/import.test.ts` | IMP-系の単体テスト |
+
+## エラー一覧
+
+| 条件 | 挙動 |
+|------|------|
+| `.cube` の `LUT_3D_SIZE` 欠落・範囲外・非整数 | エラー |
+| `.cube` の `LUT_1D_SIZE` 存在 | エラー（非対応） |
+| データ行数の不一致・非数値・要素数不足 | エラー（行番号付き） |
+| PNGがどちらのレイアウト署名にも合わない | エラー |
+| PNGのデコード失敗 | エラー |
+| 対象外拡張子（`.3dl` 等） | エラー |

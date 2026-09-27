@@ -16,12 +16,14 @@
   - 調整パラメータの型と適用関数（露出、コントラスト、彩度、色温度、色相、RGBカーブ、リフト・ガンマ・ゲイン）
   - 中立LUT生成と、LUTへのパイプライン適用
   - `.cube` テキスト生成とPNGアトラス生成
+  - `.cube` とPNG画像LUTの読み込み、ベースLUTとの合成
 - `src/preview/`：WebGL2レンダラ。3DテクスチャでLUTを適用し、非対応環境では2Dアトラス参照にフォールバックする。
 - `src/ui/`：画像一覧グリッド、調整パネル、原画比較、プリセットの保存と読み込み。
 - 依存方向は `ui → preview → engine` の一方向とする。
 - データモデル：
   - `AdjustmentSet`：全調整パラメータの値。プリセットJSONの形式と同一。
   - `LutData`：`Float32Array`（size³×3）。
+  - `ImportedLut`：読み込んだベースLUT（`LutData` と TITLE・ドメイン情報）。
   - `ImageEntry`：読み込み済み画像（ImageBitmapとメタ情報）。
 
 ## フェーズ別タスク
@@ -63,6 +65,18 @@
 - [x] JSONプリセットの保存・読み込み
 
 受け入れ条件：要件定義書のF1からF7までがすべて動作する。
+
+### Phase 5: 既存LUTの読み込み
+
+詳細設計は `lut-import-design.md`、テスト項目は `lut-import-test-spec.md` を参照する。
+
+- [ ] `.cube` パーサ（LUT_3D_SIZE、コメント・DOMAIN・改行コードへの耐性、エラー系）
+- [ ] PNG画像LUTの寸法判別とデコード（HaldCLUT・ReShade）
+- [ ] ベースLUT合成（`withBaseLut`）と解除経路
+- [ ] 読み込みUI（パネルのベースLUTセクション、ドロップゾーンでの `.cube` 振り分け）
+- [ ] 単体テスト（`tests/import.test.ts`、IMP-01〜27）と手動確認（IMP-31〜41）
+
+受け入れ条件：`lut-import-test-spec.md` の全項目がパスし、自前の書き出しとの往復が一致する。
 
 ## 引き継ぎ手順
 
