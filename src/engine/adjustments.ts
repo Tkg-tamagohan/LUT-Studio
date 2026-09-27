@@ -31,12 +31,35 @@ export interface AdjustmentSet {
   gamma: [number, number, number];
   /** ゲイン（ハイライト）。各色0より大きい。1で中立。 */
   gain: [number, number, number];
+  /** 色相アイソレーション。mode="off" で無効。 */
+  isolation: IsolationParams;
 }
 
 export const IDENTITY_CURVE: CurvePoint[] = [
   { x: 0, y: 0 },
   { x: 1, y: 1 },
 ];
+
+/**
+ * 色相アイソレーションのモード（仕様決定K）。
+ * - isolate: 指定色相範囲だけ彩色を残し、範囲外を脱色する（部分色残し）
+ * - select:  指定色相範囲の内側だけ彩度を強調する（範囲補正。仮実装）
+ * - mask:    選択範囲をグレースケールで可視化する（設定確認用。仮実装）
+ */
+export type IsolationMode = "off" | "isolate" | "select" | "mask";
+
+/** 色相選択の設定。色相環上の中心色相と、範囲・端のぼかしを度数で指定する。 */
+export interface IsolationParams {
+  mode: IsolationMode;
+  /** 選択の中心となる色相。0〜360度。 */
+  hue: number;
+  /** 選択範囲の半幅。0〜180度。 */
+  range: number;
+  /** 選択範囲の端を滑らかにする幅。0〜90度。 */
+  feather: number;
+  /** 効果の強さ。0〜1。mask モードでは未使用。 */
+  strength: number;
+}
 
 export function neutralAdjustments(): AdjustmentSet {
   return {
@@ -52,6 +75,7 @@ export function neutralAdjustments(): AdjustmentSet {
     lift: [0, 0, 0],
     gamma: [1, 1, 1],
     gain: [1, 1, 1],
+    isolation: { mode: "off", hue: 0, range: 30, feather: 15, strength: 1 },
   };
 }
 
@@ -80,6 +104,30 @@ export function evaluateCurve(points: CurvePoint[], x: number): number {
 const LUMA_R = 0.2126;
 const LUMA_G = 0.7152;
 const LUMA_B = 0.0722;
+
+/** RGBから色相（度）を求める。無彩色は0を返す。 */
+function hueDegrees(r: number, g: number, b: number): number {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d < 1e-6) return 0;
+  let h: number;
+  if (max === r) h = (60 * (g - b)) / d;
+  else if (max === g) h = (60 * (b - r)) / d + 120;
+  else h = (60 * (r - g)) / d + 240;
+  return ((h % 360) + 360) % 360;
+}
+
+/** 色相環上の最短距離（0〜180度）。 */
+function hueDistance(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = clamp01((x - edge0) / (edge1 - edge0));
+  return t * t * (3 - 2 * t);
+}
 
 /** 色温度の最大シフト量。-1〜1の入力に対するチャネル値の変化幅。 */
 const TEMPERATURE_SHIFT = 0.15;
@@ -162,6 +210,31 @@ export function compileAdjustments(adj: AdjustmentSet): ColorTransform {
       r = nr;
       g = ng;
       b = nb;
+    }
+
+    const iso = adj.isolation;
+    if (iso.mode !== "off") {
+      const h = hueDegrees(r, g, b);
+      const outer = iso.range + Math.max(iso.feather, 0.001);
+      const mask = 1 - smoothstep(iso.range, outer, hueDistance(h, iso.hue));
+      const lumaI = r * LUMA_R + g * LUMA_G + b * LUMA_B;
+      if (iso.mode === "isolate") {
+        // mask=1 は原色、mask=0 は strength に応じて脱色
+        const keep = mask + (1 - mask) * (1 - iso.strength);
+        r = lumaI + (r - lumaI) * keep;
+        g = lumaI + (g - lumaI) * keep;
+        b = lumaI + (b - lumaI) * keep;
+      } else if (iso.mode === "select") {
+        const boost = 1 + iso.strength * 2 * mask;
+        r = lumaI + (r - lumaI) * boost;
+        g = lumaI + (g - lumaI) * boost;
+        b = lumaI + (b - lumaI) * boost;
+      } else {
+        // mask: 選択度をグレースケールで出力
+        r = mask;
+        g = mask;
+        b = mask;
+      }
     }
 
     r = lookupCurve(tableR, lookupCurve(tableMaster, r));

@@ -16,7 +16,8 @@ void main() {
     float((gl_VertexID & 1) << 2) - 1.0,
     float((gl_VertexID & 2) << 1) - 1.0
   );
-  v_uv = pos * 0.5 + 0.5;
+  // 画像の上端が画面上端になるようYを反転してサンプルする。
+  v_uv = vec2(pos.x * 0.5 + 0.5, 0.5 - pos.y * 0.5);
   gl_Position = vec4(pos, 0.0, 1.0);
 }
 `;
@@ -110,7 +111,6 @@ export function createRenderer(
   const imageTex = gl.createTexture();
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, imageTex);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -119,7 +119,6 @@ export function createRenderer(
   const lutTex = gl.createTexture();
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_3D, lutTex);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -146,7 +145,6 @@ export function createRenderer(
   return {
     setImage(bitmap) {
       gl.activeTexture(gl.TEXTURE0);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
@@ -160,8 +158,6 @@ export function createRenderer(
     setLut(lut) {
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_3D, lutTex);
-      // 画像アップロード用の反転フラグが残っているとLUTの赤軸（z）が反転する。
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
       if (lut.size !== lutSize) {
         lutSize = lut.size;
         // RGB16F はWebGL2コアで線形フィルタ可能。FLOAT型でFloat32Arrayを渡せる。

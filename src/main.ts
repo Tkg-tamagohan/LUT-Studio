@@ -79,7 +79,9 @@ async function addFiles(files: Iterable<File>): Promise<void> {
 }
 
 fileInput.addEventListener("change", () => {
-  if (fileInput.files) void addFiles(fileInput.files);
+  // FileList は input の内容を参照する生きたリストなので、
+  // value のクリアより先に配列へ固定する（非同期読み込み中の取りこぼし防止）。
+  if (fileInput.files) void addFiles(Array.from(fileInput.files));
   fileInput.value = "";
 });
 
@@ -98,7 +100,7 @@ dropzone.addEventListener("dragleave", () => {
 dropzone.addEventListener("drop", (e) => {
   e.preventDefault();
   dropzone.classList.remove("dragging");
-  if (e.dataTransfer) void addFiles(e.dataTransfer.files);
+  if (e.dataTransfer) void addFiles(Array.from(e.dataTransfer.files));
 });
 
 window.addEventListener("resize", renderAll);

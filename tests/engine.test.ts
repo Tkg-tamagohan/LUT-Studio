@@ -249,6 +249,93 @@ describe("ADJ-08 色温度は暖色方向で赤を増し青を減らす", () => 
   });
 });
 
+describe("ISO-01 分離モード（部分色残し）", () => {
+  const isolateRed = () => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      mode: "isolate",
+      hue: 0,
+      range: 30,
+      feather: 10,
+      strength: 1,
+    };
+    return adj;
+  };
+
+  it("範囲内の色はそのまま残る", () => {
+    const out = new Float32Array(3);
+    applyAdjustments(1, 0, 0, isolateRed(), out);
+    expect(out[0]).toBeCloseTo(1, 5);
+    expect(out[1]).toBeCloseTo(0, 5);
+    expect(out[2]).toBeCloseTo(0, 5);
+  });
+
+  it("範囲外の色は輝度へ脱色される", () => {
+    const out = new Float32Array(3);
+    applyAdjustments(0, 0, 1, isolateRed(), out);
+    expect(out[0]).toBeCloseTo(out[1], 5);
+    expect(out[1]).toBeCloseTo(out[2], 5);
+    expect(out[0]).toBeCloseTo(0.0722, 3);
+  });
+
+  it("強度が弱いと範囲外の脱色が緩和される", () => {
+    const adj = isolateRed();
+    adj.isolation.strength = 0.5;
+    const out = new Float32Array(3);
+    applyAdjustments(0, 0, 1, adj, out);
+    // 青成分が輝度より残るが完全には残らない
+    expect(out[2]).toBeGreaterThan(out[0] + 0.1);
+    expect(out[2]).toBeLessThan(0.9);
+  });
+
+  it("色相環の0/360境界をまたいで選択できる", () => {
+    const adj = isolateRed();
+    adj.isolation.hue = 350;
+    const out = new Float32Array(3);
+    applyAdjustments(1, 0, 0, adj, out);
+    expect(out[0]).toBeCloseTo(1, 5);
+    expect(out[1]).toBeCloseTo(0, 5);
+  });
+});
+
+describe("ISO-02 範囲補正モード", () => {
+  it("範囲内の彩度だけが強調される", () => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      mode: "select",
+      hue: 0,
+      range: 30,
+      feather: 10,
+      strength: 1,
+    };
+    const neutral = new Float32Array(3);
+    applyAdjustments(0.5, 0.4, 0.4, neutralAdjustments(), neutral);
+    const out = new Float32Array(3);
+    applyAdjustments(0.5, 0.4, 0.4, adj, out);
+    expect(out[0] - out[1]).toBeGreaterThan(neutral[0] - neutral[1]);
+  });
+});
+
+describe("ISO-03 マスク表示モード", () => {
+  it("範囲内は白・範囲外は黒のグレースケールで出力される", () => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      mode: "mask",
+      hue: 0,
+      range: 30,
+      feather: 10,
+      strength: 1,
+    };
+    const out = new Float32Array(3);
+    applyAdjustments(1, 0, 0, adj, out);
+    expect(out[0]).toBeCloseTo(1, 5);
+    applyAdjustments(0, 0, 1, adj, out);
+    expect(out[0]).toBeCloseTo(0, 5);
+    expect(out[1]).toBeCloseTo(0, 5);
+    expect(out[2]).toBeCloseTo(0, 5);
+  });
+});
+
 // 以下は外部ソフト側の規約で書き出し物をデコードし、元LUTと全点照合する互換テスト。
 // 各デコード関数は外部形式の仕様から独立に書き、実装の詳細を共有しない。
 
