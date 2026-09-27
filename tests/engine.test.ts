@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyAdjustments,
   bakeLut,
+  compileAdjustments,
   createNeutralLut,
   evaluateCurve,
   lutIndex,
@@ -10,7 +11,19 @@ import {
   lutToReShade,
   neutralAdjustments,
   sampleLut,
+  type LutData,
 } from "../src/engine";
+
+/**
+ * 軸の入れ替わりを検出できるよう、チャネルを巡回する非対称LUTを作る。
+ */
+function permutedLut(size: number): LutData {
+  return bakeLut(size, (r, g, b, out) => {
+    out[0] = b;
+    out[1] = r;
+    out[2] = g;
+  });
+}
 
 const EPS = 1e-6;
 
@@ -30,12 +43,14 @@ describe("LUT-02 中立変換の焼き付けは恒等LUTになる", () => {
   it("恒等変換を適用したLUTは中立LUTと一致する", () => {
     const neutral = createNeutralLut(33);
     const adj = neutralAdjustments();
-    const baked = bakeLut(33, (r, g, b, out) =>
-      applyAdjustments(r, g, b, adj, out),
-    );
+    // bakeLut は格子点ごとに変換を呼ぶため、コンパイルは一度だけ行う
+    const transform = compileAdjustments(adj);
+    const baked = bakeLut(33, transform);
+    let mismatches = 0;
     for (let i = 0; i < neutral.data.length; i++) {
-      expect(baked.data[i]).toBeCloseTo(neutral.data[i], 5);
+      if (Math.abs(baked.data[i] - neutral.data[i]) > 1e-5) mismatches++;
     }
+    expect(mismatches).toBe(0);
   });
 });
 
@@ -51,10 +66,11 @@ describe("LUT-03 .cube 書き出し", () => {
     expect(lines.length).toBe(4 + 33 * 33 * 33);
   });
 
-  it("データ行は青を最速に進める順序である", () => {
+  it("データ行は赤を最速に進める順序である", () => {
     expect(lines[4]).toBe("0.000000 0.000000 0.000000");
-    expect(lines[5]).toBe("0.000000 0.000000 0.031250");
+    expect(lines[5]).toBe("0.031250 0.000000 0.000000");
     expect(lines[4 + 33]).toBe("0.000000 0.031250 0.000000");
+    expect(lines[4 + 33 * 33]).toBe("0.000000 0.000000 0.031250");
     expect(lines[lines.length - 1]).toBe("1.000000 1.000000 1.000000");
   });
 });
@@ -72,11 +88,14 @@ describe("LUT-04 HaldCLUT 書き出し", () => {
     const step = Math.round(255 / 63); // 1/63 → 4
     // 画素0: (0,0,0)
     expect([...img.data.slice(0, 4)]).toEqual([0, 0, 0, 255]);
-    // 画素1: 青が1段進む → (0,0,1/63)
-    expect([...img.data.slice(4, 8)]).toEqual([0, 0, step, 255]);
-    // 画素64²: 赤が1段進む → (1/63,0,0)
-    const i64 = 64 * 64 * 4;
-    expect([...img.data.slice(i64, i64 + 4)]).toEqual([step, 0, 0, 255]);
+    // 画素1: 赤が1段進む → (1/63,0,0)
+    expect([...img.data.slice(4, 8)]).toEqual([step, 0, 0, 255]);
+    // 画素64: 緑が1段進む → (0,1/63,0)
+    const i64 = 64 * 4;
+    expect([...img.data.slice(i64, i64 + 4)]).toEqual([0, step, 0, 255]);
+    // 画素64²: 青が1段進む → (0,0,1/63)
+    const i4096 = 64 * 64 * 4;
+    expect([...img.data.slice(i4096, i4096 + 4)]).toEqual([0, 0, step, 255]);
   });
 });
 
@@ -87,15 +106,15 @@ describe("LUT-05 ReShade 書き出し", () => {
     expect(img.height).toBe(64);
   });
 
-  it("xはタイル内で緑・タイル間で青、yは赤に対応する", () => {
+  it("xはタイル内で赤・タイル間で青、yは緑に対応する", () => {
     const img = lutToReShade(createNeutralLut(64));
     const step = Math.round(255 / 63);
     const px = (x: number, y: number) =>
       [...img.data.slice((y * 4096 + x) * 4, (y * 4096 + x) * 4 + 4)];
     expect(px(0, 0)).toEqual([0, 0, 0, 255]);
-    expect(px(1, 0)).toEqual([0, step, 0, 255]); // g=1/63
+    expect(px(1, 0)).toEqual([step, 0, 0, 255]); // r=1/63
     expect(px(64, 0)).toEqual([0, 0, step, 255]); // 次タイル → b=1/63
-    expect(px(0, 1)).toEqual([step, 0, 0, 255]); // r=1/63
+    expect(px(0, 1)).toEqual([0, step, 0, 255]); // g=1/63
   });
 });
 
@@ -227,5 +246,92 @@ describe("ADJ-08 色温度は暖色方向で赤を増し青を減らす", () => 
     applyAdjustments(0.5, 0.5, 0.5, adj, out);
     expect(out[0]).toBeGreaterThan(0.5);
     expect(out[2]).toBeLessThan(0.5);
+  });
+});
+
+// 以下は外部ソフト側の規約で書き出し物をデコードし、元LUTと全点照合する互換テスト。
+// 各デコード関数は外部形式の仕様から独立に書き、実装の詳細を共有しない。
+
+describe("LUT-07 .cube を標準規約（赤最速）で読み戻すと元LUTと一致する", () => {
+  it("非対称LUTの全格子点が一致する", () => {
+    const lut = permutedLut(33);
+    const lines = lutToCube(lut).trimEnd().split("\n").slice(4);
+    // 標準規約: 行k の入力は (r=k%size, g=floor(k/size)%size, b=floor(k/size²))
+    const size = lut.size;
+    let mismatches = 0;
+    let firstMismatch = "";
+    for (let k = 0; k < lines.length; k++) {
+      const r = k % size;
+      const g = Math.floor(k / size) % size;
+      const b = Math.floor(k / (size * size));
+      const [vr, vg, vb] = lines[k].split(" ").map(Number);
+      const i = lutIndex(size, r, g, b);
+      if (
+        Math.abs(vr - lut.data[i]) > 1e-5 ||
+        Math.abs(vg - lut.data[i + 1]) > 1e-5 ||
+        Math.abs(vb - lut.data[i + 2]) > 1e-5
+      ) {
+        mismatches++;
+        if (!firstMismatch)
+          firstMismatch = `行${k}: got ${lines[k]}, want ${lut.data[i]} ${lut.data[i + 1]} ${lut.data[i + 2]}`;
+      }
+    }
+    expect(mismatches, firstMismatch).toBe(0);
+  });
+});
+
+describe("LUT-08 HaldCLUT を外部規約で読み戻すと元LUTと一致する", () => {
+  it("非対称LUTの全画素が一致する", () => {
+    const lut = permutedLut(64);
+    const img = lutToHald(lut);
+    // ImageMagick hald: 規約: 画素i の入力は (r=i%L², g=floor(i/L²)%L², b=floor(i/L⁴))
+    const levelSq = lut.size;
+    let mismatches = 0;
+    let firstMismatch = -1;
+    for (let i = 0; i < img.width * img.height; i++) {
+      const r = i % levelSq;
+      const g = Math.floor(i / levelSq) % levelSq;
+      const b = Math.floor(i / (levelSq * levelSq));
+      const src = lutIndex(lut.size, r, g, b);
+      const dst = i * 4;
+      if (
+        img.data[dst] !== Math.round(lut.data[src] * 255) ||
+        img.data[dst + 1] !== Math.round(lut.data[src + 1] * 255) ||
+        img.data[dst + 2] !== Math.round(lut.data[src + 2] * 255)
+      ) {
+        mismatches++;
+        if (firstMismatch < 0) firstMismatch = i;
+      }
+    }
+    expect(mismatches, `最初の不一致画素: ${firstMismatch}`).toBe(0);
+  });
+});
+
+describe("LUT-09 ReShade形式を外部規約で読み戻すと元LUTと一致する", () => {
+  it("非対称LUTの全画素が一致する", () => {
+    const lut = permutedLut(64);
+    const img = lutToReShade(lut);
+    const size = lut.size;
+    // ReShade規約: 入力(r,g,b) は画素 (x=b*size+r, y=g)
+    let mismatches = 0;
+    let firstMismatch = "";
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size * size; x++) {
+        const g = y;
+        const b = Math.floor(x / size);
+        const r = x % size;
+        const src = lutIndex(size, r, g, b);
+        const dst = (y * img.width + x) * 4;
+        if (
+          img.data[dst] !== Math.round(lut.data[src] * 255) ||
+          img.data[dst + 1] !== Math.round(lut.data[src + 1] * 255) ||
+          img.data[dst + 2] !== Math.round(lut.data[src + 2] * 255)
+        ) {
+          mismatches++;
+          if (!firstMismatch) firstMismatch = `(${x},${y})`;
+        }
+      }
+    }
+    expect(mismatches, `最初の不一致画素: ${firstMismatch}`).toBe(0);
   });
 });

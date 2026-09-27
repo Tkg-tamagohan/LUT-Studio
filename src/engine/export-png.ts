@@ -10,7 +10,7 @@ export interface RgbaImage {
 /**
  * HaldCLUT形式に変換する（仕様決定J）。
  * レベルLのHald CLUTは L³×L³ ピクセルの正方形画像で、LUTサイズは L²。
- * 画素は行優先の連番で、赤を最遅・青を最速に入力色が割り当てられる。
+ * 画素は行優先の連番で、赤を最速・青を最遅に入力色が割り当てられる。
  * LUTサイズの平方根が整数でない場合は生成できないためエラーとする。
  */
 export function lutToHald(lut: LutData): RgbaImage {
@@ -25,9 +25,9 @@ export function lutToHald(lut: LutData): RgbaImage {
   const data = new Uint8ClampedArray(pixels * 4);
   const levelSq = level * level;
   for (let i = 0; i < pixels; i++) {
-    const r = Math.floor(i / (levelSq * levelSq));
+    const r = i % levelSq;
     const g = Math.floor(i / levelSq) % levelSq;
-    const b = i % levelSq;
+    const b = Math.floor(i / (levelSq * levelSq));
     const src = lutIndex(lut.size, r, g, b);
     const dst = i * 4;
     data[dst] = to8bit(lut.data[src]);
@@ -40,7 +40,7 @@ export function lutToHald(lut: LutData): RgbaImage {
 
 /**
  * ReShade形式に変換する（仕様決定J）。
- * 幅 size²・高さ size の横長画像で、タイルが青軸、タイル内のxが緑軸、yが赤軸。
+ * 幅 size²・高さ size の横長画像で、タイルが青軸、タイル内のxが赤軸、yが緑軸。
  */
 export function lutToReShade(lut: LutData): RgbaImage {
   const size = lut.size;
@@ -50,8 +50,8 @@ export function lutToReShade(lut: LutData): RgbaImage {
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const b = Math.floor(x / size);
-      const g = x % size;
-      const r = y;
+      const r = x % size;
+      const g = y;
       const src = lutIndex(size, r, g, b);
       const dst = (y * width + x) * 4;
       data[dst] = to8bit(lut.data[src]);

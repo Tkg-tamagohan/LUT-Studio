@@ -1,8 +1,9 @@
-import { clamp01, type LutData } from "./lut";
+import { clamp01, lutIndex, type LutData } from "./lut";
 
 /**
  * `.cube` 形式（Iridas/Adobeの3D LUTテキスト）に変換する。
- * データ行は青を最速に進める順で書き出す（LUT内部配列と同じ順序）。
+ * `.cube` のデータ行は赤を最速・青を最遅に列挙する規約であり、
+ * LUT内部配列（青最速）とは順序が異なるため、ここで走査順を変換する。
  */
 export function lutToCube(lut: LutData, title = "LUT-Studio"): string {
   const lines: string[] = [
@@ -11,10 +12,15 @@ export function lutToCube(lut: LutData, title = "LUT-Studio"): string {
     "DOMAIN_MIN 0.0 0.0 0.0",
     "DOMAIN_MAX 1.0 1.0 1.0",
   ];
-  for (let i = 0; i < lut.data.length; i += 3) {
-    lines.push(
-      `${fmt(lut.data[i])} ${fmt(lut.data[i + 1])} ${fmt(lut.data[i + 2])}`,
-    );
+  for (let b = 0; b < lut.size; b++) {
+    for (let g = 0; g < lut.size; g++) {
+      for (let r = 0; r < lut.size; r++) {
+        const i = lutIndex(lut.size, r, g, b);
+        lines.push(
+          `${fmt(lut.data[i])} ${fmt(lut.data[i + 1])} ${fmt(lut.data[i + 2])}`,
+        );
+      }
+    }
   }
   return lines.join("\n") + "\n";
 }

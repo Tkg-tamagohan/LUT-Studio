@@ -1,4 +1,4 @@
-import { clamp01 } from "./lut";
+import { clamp01, type ColorTransform } from "./lut";
 
 export interface CurvePoint {
   x: number;
@@ -84,11 +84,97 @@ const LUMA_B = 0.0722;
 /** 色温度の最大シフト量。-1〜1の入力に対するチャネル値の変化幅。 */
 const TEMPERATURE_SHIFT = 0.15;
 
+/** カーブ評価テーブルの段数。区分線形カーブを線形補間で引くため精度上十分。 */
+const CURVE_TABLE_SIZE = 1024;
+
+type CurveTable = Float32Array;
+
 /**
- * 調整を正規化入力色へ適用する。適用順は
- * 露出 → 色温度 → コントラスト → 彩度 → 色相 → カーブ → リフト/ガンマ/ゲイン
- * とし、最後に0〜1へ丸める。
+ * カーブを引き表に展開する。制御点が2点未満、または恒等写像になる場合は
+ * null を返して呼び出し側で素通りさせる（量子化誤差を入れないため）。
  */
+function buildCurveTable(points: CurvePoint[]): CurveTable | null {
+  if (points.length < 2) return null;
+  const table = new Float32Array(CURVE_TABLE_SIZE);
+  let identity = true;
+  for (let i = 0; i < CURVE_TABLE_SIZE; i++) {
+    const v = evaluateCurve(points, i / (CURVE_TABLE_SIZE - 1));
+    table[i] = v;
+    if (Math.abs(v - i / (CURVE_TABLE_SIZE - 1)) > 1e-6) identity = false;
+  }
+  return identity ? null : table;
+}
+
+function lookupCurve(table: CurveTable | null, x: number): number {
+  if (table === null) return x;
+  const pos = clamp01(x) * (CURVE_TABLE_SIZE - 1);
+  const i = Math.min(Math.floor(pos), CURVE_TABLE_SIZE - 2);
+  const t = pos - i;
+  return table[i] * (1 - t) + table[i + 1] * t;
+}
+
+/**
+ * 調整一式を変換関数へコンパイルする。LUT焼き付けでは格子点ごとに呼ぶため、
+ * カーブの引き表をここで一度だけ構築する（1画素ごとのソートを避ける）。
+ * 適用順は 露出 → 色温度 → コントラスト → 彩度 → 色相 → カーブ →
+ * リフト/ガンマ/ゲイン とし、最後に0〜1へ丸める。
+ */
+export function compileAdjustments(adj: AdjustmentSet): ColorTransform {
+  const exp = Math.pow(2, adj.exposure);
+  const tempShift = adj.temperature * TEMPERATURE_SHIFT;
+  const contrastFactor = 1 + adj.contrast;
+  const satFactor = 1 + adj.saturation;
+  const theta = (adj.hue * Math.PI) / 180;
+  const cos = Math.cos(theta);
+  const sin = Math.sin(theta);
+  const tableMaster = buildCurveTable(adj.curveMaster);
+  const tableR = buildCurveTable(adj.curveR);
+  const tableG = buildCurveTable(adj.curveG);
+  const tableB = buildCurveTable(adj.curveB);
+
+  return (r, g, b, out) => {
+    r *= exp;
+    g *= exp;
+    b *= exp;
+
+    r += tempShift;
+    b -= tempShift;
+
+    r = (r - 0.5) * contrastFactor + 0.5;
+    g = (g - 0.5) * contrastFactor + 0.5;
+    b = (b - 0.5) * contrastFactor + 0.5;
+
+    const luma = r * LUMA_R + g * LUMA_G + b * LUMA_B;
+    r = luma + (r - luma) * satFactor;
+    g = luma + (g - luma) * satFactor;
+    b = luma + (b - luma) * satFactor;
+
+    if (adj.hue !== 0) {
+      const k = 1 / Math.sqrt(3);
+      const dot = (r + g + b) * k;
+      const crossR = k * (b - g);
+      const crossG = k * (r - b);
+      const crossB = k * (g - r);
+      const common = dot * (1 - cos);
+      const nr = r * cos + crossR * sin + k * common;
+      const ng = g * cos + crossG * sin + k * common;
+      const nb = b * cos + crossB * sin + k * common;
+      r = nr;
+      g = ng;
+      b = nb;
+    }
+
+    r = lookupCurve(tableR, lookupCurve(tableMaster, r));
+    g = lookupCurve(tableG, lookupCurve(tableMaster, g));
+    b = lookupCurve(tableB, lookupCurve(tableMaster, b));
+
+    out[0] = applyLgg(r, adj.lift[0], adj.gamma[0], adj.gain[0]);
+    out[1] = applyLgg(g, adj.lift[1], adj.gamma[1], adj.gain[1]);
+    out[2] = applyLgg(b, adj.lift[2], adj.gamma[2], adj.gain[2]);
+  };
+}
+
+/** 単色への適用。LUT焼き付けでは compileAdjustments を使う。 */
 export function applyAdjustments(
   r: number,
   g: number,
@@ -96,51 +182,7 @@ export function applyAdjustments(
   adj: AdjustmentSet,
   out: Float32Array,
 ): void {
-  const exp = Math.pow(2, adj.exposure);
-  r *= exp;
-  g *= exp;
-  b *= exp;
-
-  const tempShift = adj.temperature * TEMPERATURE_SHIFT;
-  r += tempShift;
-  b -= tempShift;
-
-  const contrastFactor = 1 + adj.contrast;
-  r = (r - 0.5) * contrastFactor + 0.5;
-  g = (g - 0.5) * contrastFactor + 0.5;
-  b = (b - 0.5) * contrastFactor + 0.5;
-
-  const luma = r * LUMA_R + g * LUMA_G + b * LUMA_B;
-  const satFactor = 1 + adj.saturation;
-  r = luma + (r - luma) * satFactor;
-  g = luma + (g - luma) * satFactor;
-  b = luma + (b - luma) * satFactor;
-
-  if (adj.hue !== 0) {
-    const theta = (adj.hue * Math.PI) / 180;
-    const cos = Math.cos(theta);
-    const sin = Math.sin(theta);
-    const k = 1 / Math.sqrt(3);
-    const dot = (r + g + b) * k;
-    const crossR = k * (b - g);
-    const crossG = k * (r - b);
-    const crossB = k * (g - r);
-    const common = dot * (1 - cos);
-    const nr = r * cos + crossR * sin + k * common;
-    const ng = g * cos + crossG * sin + k * common;
-    const nb = b * cos + crossB * sin + k * common;
-    r = nr;
-    g = ng;
-    b = nb;
-  }
-
-  r = evaluateCurve(adj.curveR, evaluateCurve(adj.curveMaster, r));
-  g = evaluateCurve(adj.curveG, evaluateCurve(adj.curveMaster, g));
-  b = evaluateCurve(adj.curveB, evaluateCurve(adj.curveMaster, b));
-
-  out[0] = applyLgg(r, adj.lift[0], adj.gamma[0], adj.gain[0]);
-  out[1] = applyLgg(g, adj.lift[1], adj.gamma[1], adj.gain[1]);
-  out[2] = applyLgg(b, adj.lift[2], adj.gamma[2], adj.gain[2]);
+  compileAdjustments(adj)(r, g, b, out);
 }
 
 /** リフト・ガンマ・ゲイン。in=0にlift、in=1にgainが効き、中間はガンマで歪める。 */
