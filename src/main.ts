@@ -87,11 +87,17 @@ function baseName(filename: string): string {
   return filename.replace(/\.[^.]+$/, "") || "image";
 }
 
+/** 書き出しLUT名に付けるタイムスタンプ（_yyMMddhhmm、ローカル時刻）。 */
+function lutTimestamp(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `_${String(d.getFullYear()).slice(-2)}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
 async function exportPngLut(kind: "hald" | "reshade"): Promise<void> {
   const exportLut = bakeExportLut(IMAGE_LUT_SIZE);
   const img = kind === "hald" ? lutToHald(exportLut) : lutToReShade(exportLut);
   const blob = await rgbaToPngBlob(img);
-  const name = `lut-studio-${kind}.png`;
+  const name = `lut-studio-${kind}${lutTimestamp()}.png`;
   downloadBlob(blob, name);
   status.textContent = `LUTを書き出しました: ${name}`;
 }
@@ -99,8 +105,9 @@ async function exportPngLut(kind: "hald" | "reshade"): Promise<void> {
 function exportLutFile(format: LutExportFormat): void {
   if (format === "cube") {
     const cube = lutToCube(bakeExportLut(CUBE_LUT_SIZE));
-    downloadBlob(new Blob([cube], { type: "text/plain" }), "lut-studio.cube");
-    status.textContent = "LUTを書き出しました: lut-studio.cube";
+    const name = `lut-studio${lutTimestamp()}.cube`;
+    downloadBlob(new Blob([cube], { type: "text/plain" }), name);
+    status.textContent = `LUTを書き出しました: ${name}`;
     return;
   }
   void exportPngLut(format);
@@ -109,35 +116,101 @@ function exportLutFile(format: LutExportFormat): void {
 /** 書き出し済みの画像ファイル名。同名画像があっても出力名が衝突しないよう管理する。 */
 const exportedImageNames = new Set<string>();
 
-/** LUTを適用した画像を元ファイルの解像度でPNG化して保存する（仕様決定G）。 */
+/**
+ * LUTを適用した画像をPNG化して保存する。原則として元ファイルの解像度
+ * （仕様決定G）。ただし端末のcanvas上限を超える巨大画像はエラーにならず
+ * ラスタが黙って縮小され画質が劣化するため、タッチ中心端末では事前に
+ * EXPORT_MAX_SIDE_CONSTRAINED まで縮小し、それでも失敗した場合は
+ * 半分ずつ縮小して再試行する（仕様決定Q）。
+ */
+/**
+ * モバイル等のcanvas上限に安全に収める長辺(px)。これを超えるとブラウザが
+ * ラスタを黙って縮小し、書き出しが「高解像度だが粗い」になるため。
+ */
+const EXPORT_MAX_SIDE_CONSTRAINED = 4096;
+
 async function exportImage(
   entry: ImageEntry,
   exportLut: LutData,
 ): Promise<string> {
+  const file = entry.file;
+  // 縮小再試行の下限。プレビューに読み込めたサイズまでは必ず試す
+  const limit = Math.max(entry.width, entry.height, 1);
   // プレビュー用に縮小済みのbitmapではなく、元ファイルからフル解像度で再デコードする
-  const bitmap = await createImageBitmap(entry.file);
-  const width = bitmap.width;
-  const height = bitmap.height;
+  let bitmap: ImageBitmap;
   try {
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) throw new Error("canvasコンテキストを取得できません");
-    ctx.drawImage(bitmap, 0, 0);
+    bitmap = await createImageBitmap(file);
+  } catch {
+    // フル解像度のデコード自体がメモリで失敗する環境では読み込み済みサイズに縮小する
+    bitmap = await createImageBitmap(file, {
+      resizeWidth: entry.width,
+      resizeHeight: entry.height,
+      resizeQuality: "high",
+    });
+  }
+  // タッチ中心端末ではcanvasの暗黙縮小を防ぐため先に縮小する
+  const constrained =
+    window.matchMedia("(pointer: coarse)").matches ||
+    window.matchMedia("(max-width: 640px)").matches;
+  // 縮小して書き出したときの出力寸法。成功時のステータスに残す
+  let shrunkNote: string | null = null;
+  if (
+    constrained &&
+    Math.max(bitmap.width, bitmap.height) > EXPORT_MAX_SIDE_CONSTRAINED
+  ) {
+    const scale =
+      EXPORT_MAX_SIDE_CONSTRAINED / Math.max(bitmap.width, bitmap.height);
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
     bitmap.close();
-    {
-      const pixels = ctx.getImageData(0, 0, width, height);
-      applyLutToRgba(exportLut, pixels.data);
-      ctx.putImageData(pixels, 0, 0);
+    bitmap = await createImageBitmap(file, {
+      resizeWidth: w,
+      resizeHeight: h,
+      resizeQuality: "high",
+    });
+    shrunkNote = `${w}×${h}に縮小`;
+    status.textContent = `${entry.name} は端末のcanvas上限のため ${w}×${h} に縮小して書き出します`;
+  }
+  try {
+    for (;;) {
+      const width = bitmap.width;
+      const height = bitmap.height;
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      try {
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) throw new Error("canvasコンテキストを取得できません");
+        ctx.drawImage(bitmap, 0, 0);
+        const pixels = ctx.getImageData(0, 0, width, height);
+        applyLutToRgba(exportLut, pixels.data);
+        ctx.putImageData(pixels, 0, 0);
+        const blob = await canvasToPngBlob(canvas);
+        // エンコード済みのcanvasバッファはすぐ手放し、一括書き出し時のピークを抑える
+        canvas.width = 0;
+        canvas.height = 0;
+        const filename = uniqueImageExportName(
+          baseName(entry.name),
+          exportedImageNames,
+        );
+        downloadBlob(blob, filename);
+        return shrunkNote ? `${filename}（${shrunkNote}）` : filename;
+      } catch (e) {
+        canvas.width = 0;
+        canvas.height = 0;
+        const nextW = Math.floor(width / 2);
+        const nextH = Math.floor(height / 2);
+        if (Math.max(nextW, nextH) < limit) throw e;
+        shrunkNote = `${nextW}×${nextH}に縮小`;
+        status.textContent = `${entry.name} はメモリ上限のため ${nextW}×${nextH} に縮小して書き出します`;
+        bitmap.close();
+        bitmap = await createImageBitmap(file, {
+          resizeWidth: nextW,
+          resizeHeight: nextH,
+          resizeQuality: "high",
+        });
+      }
     }
-    const blob = await canvasToPngBlob(canvas);
-    // エンコード済みのcanvasバッファはすぐ手放し、一括書き出し時のピークを抑える
-    canvas.width = 0;
-    canvas.height = 0;
-    const filename = uniqueImageExportName(baseName(entry.name), exportedImageNames);
-    downloadBlob(blob, filename);
-    return filename;
   } finally {
     bitmap.close();
   }
@@ -222,7 +295,19 @@ function addImage(entry: ImageEntry): void {
   captionRow.className = "caption-row";
   const captionName = document.createElement("span");
   captionName.className = "caption-name";
-  captionName.textContent = entry.name;
+  // CSSのellipsisが末尾を切るため、拡張子を別要素に分けて末尾に残す
+  const dotIndex = entry.name.lastIndexOf(".");
+  const captionStem = document.createElement("span");
+  captionStem.className = "caption-stem";
+  captionStem.textContent =
+    dotIndex > 0 ? entry.name.slice(0, dotIndex) : entry.name;
+  captionName.appendChild(captionStem);
+  if (dotIndex > 0) {
+    const captionExt = document.createElement("span");
+    captionExt.className = "caption-ext";
+    captionExt.textContent = entry.name.slice(dotIndex);
+    captionName.appendChild(captionExt);
+  }
   const exportButton = document.createElement("button");
   exportButton.type = "button";
   exportButton.textContent = "PNG";
@@ -237,7 +322,12 @@ function addImage(entry: ImageEntry): void {
         status.textContent = `書き出しに失敗しました: ${entry.name}`;
       });
   });
-  captionRow.append(captionName, exportButton);
+  const deleteButton = document.createElement("button");
+  deleteButton.type = "button";
+  deleteButton.className = "delete-image";
+  deleteButton.textContent = "✕";
+  deleteButton.title = "この画像を削除";
+  captionRow.append(captionName, exportButton, deleteButton);
   caption.appendChild(captionRow);
   figure.append(canvas, caption);
   grid.appendChild(figure);
@@ -265,6 +355,13 @@ function addImage(entry: ImageEntry): void {
     captionName.textContent = `${entry.name}（WebGL非対応のためプレビュー不可）`;
   }
   entries.set(entry.id, { entry, renderer });
+  deleteButton.addEventListener("click", () => {
+    renderer?.dispose();
+    entry.bitmap.close();
+    entries.delete(entry.id);
+    figure.remove();
+    updateStatus();
+  });
 }
 
 async function addFiles(files: Iterable<File>): Promise<void> {
@@ -341,6 +438,9 @@ const applyTileSize = (pct: number) => {
 const savedTile = Number(localStorage.getItem(TILE_KEY));
 if (savedTile >= 15 && savedTile <= 90) {
   tileSize.value = String(savedTile);
+} else if (window.matchMedia("(max-width: 640px)").matches) {
+  // スマホ版では1枚ずつ大きく見る用途を優先し、既定を最大(90%)とする
+  tileSize.value = "90";
 }
 applyTileSize(Number(tileSize.value));
 tileSize.addEventListener("input", () => {
