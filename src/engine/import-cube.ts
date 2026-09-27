@@ -35,8 +35,10 @@ export function parseCubeLut(text: string): ImportedLut {
   let title: string | undefined;
   let domainMin: [number, number, number] = [0, 0, 0];
   let domainMax: [number, number, number] = [1, 1, 1];
-  // データ行の値を行順に並べたフラット配列（3要素ずつ）
-  const values: number[] = [];
+  // データはLUT_3D_SIZE確定後に直接書き込む。行順の一時配列を挟まず、
+  // 上限サイズ（256³）のファイルでも余分なメモリを使わないため。
+  let data: Float32Array | null = null;
+  let rowCount = 0;
 
   const lines = text.split(/\r\n|\r|\n/);
   for (let i = 0; i < lines.length; i++) {
@@ -73,6 +75,7 @@ export function parseCubeLut(text: string): ImportedLut {
         );
       }
       size = n;
+      data = new Float32Array(n * n * n * 3);
       continue;
     }
     if (head === "DOMAIN_MIN" || head === "DOMAIN_MAX") {
@@ -82,18 +85,29 @@ export function parseCubeLut(text: string): ImportedLut {
       continue;
     }
 
+    if (size === null || data === null) {
+      fail("LUT_3D_SIZE をデータ行より前に指定してください", lineNo);
+    }
     const v = parseVec3(tokens, lineNo);
-    values.push(v[0], v[1], v[2]);
+    const k = rowCount++;
+    if (k < size * size * size) {
+      // 行 k の格子は .cube 規約の赤最速なので内部表現へ軸順を写し替える
+      const r = k % size;
+      const g = Math.floor(k / size) % size;
+      const b = Math.floor(k / (size * size));
+      const dst = lutIndex(size, r, g, b);
+      data[dst] = clamp01(v[0]);
+      data[dst + 1] = clamp01(v[1]);
+      data[dst + 2] = clamp01(v[2]);
+    }
   }
 
-  if (size === null) {
+  if (size === null || data === null) {
     fail("LUT_3D_SIZE がありません");
   }
   const expected = size * size * size;
-  if (values.length !== expected * 3) {
-    fail(
-      `データ行数が一致しません（期待 ${expected} 行、実際 ${values.length / 3} 行）`,
-    );
+  if (rowCount !== expected) {
+    fail(`データ行数が一致しません（期待 ${expected} 行、実際 ${rowCount} 行）`);
   }
   for (let c = 0; c < 3; c++) {
     if (!(domainMax[c] > domainMin[c])) {
@@ -103,16 +117,6 @@ export function parseCubeLut(text: string): ImportedLut {
     }
   }
 
-  const data = new Float32Array(expected * 3);
-  for (let k = 0; k < expected; k++) {
-    const r = k % size;
-    const g = Math.floor(k / size) % size;
-    const b = Math.floor(k / (size * size));
-    const dst = lutIndex(size, r, g, b);
-    data[dst] = clamp01(values[k * 3]);
-    data[dst + 1] = clamp01(values[k * 3 + 1]);
-    data[dst + 2] = clamp01(values[k * 3 + 2]);
-  }
   const lut: LutData = { size, data };
   return { lut, title, domainMin, domainMax };
 }

@@ -8,11 +8,15 @@ function fail(reason: string): never {
   throw new Error(`画像LUTの形式が不正です: ${reason}`);
 }
 
+/** 画像LUTのサイズ上限。`.cube` の LUT_3D_SIZE 上限（256）と揃える。 */
+const MAX_SIZE = 256;
+
 /**
  * 画像の寸法署名から画像LUTのレイアウトを判別する。
- * 正方形かつ一辺が L³（L≥2）なら HaldCLUT（LUTサイズは L²）、
- * 幅が高さの平方（size²×size）で高さ≥2なら ReShade（LUTサイズは高さ）。
+ * 正方形かつ一辺が L³（L≥2、L²≤256）なら HaldCLUT（LUTサイズは L²）、
+ * 幅が高さの平方（size²×size）で 2≤高さ≤256 なら ReShade（LUTサイズは高さ）。
  * 両方を満たすのは縮退した 1×1 のみで、サイズ下限により除外される。
+ * 上限は巨大画像のデコード・保持でタブが応答不能になるのを防ぐため。
  * いずれの署名にも合わない場合は null を返す。
  */
 export function detectImageLutLayout(
@@ -21,10 +25,15 @@ export function detectImageLutLayout(
 ): ImageLutLayout | null {
   if (width === height) {
     const level = Math.round(Math.cbrt(width));
-    if (level >= 2 && level * level * level === width) return "hald";
+    const size = level * level;
+    if (level >= 2 && size <= MAX_SIZE && level * level * level === width) {
+      return "hald";
+    }
     return null;
   }
-  if (height >= 2 && width === height * height) return "reshade";
+  if (height >= 2 && height <= MAX_SIZE && width === height * height) {
+    return "reshade";
+  }
   return null;
 }
 

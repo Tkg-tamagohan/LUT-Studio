@@ -244,6 +244,21 @@ describe("IMP-13: 署名のない寸法を拒否する", () => {
   });
 });
 
+describe("IMP-43: LUTサイズ256を超える署名を拒否する", () => {
+  it.each([
+    [4913, 4913], // Hald L=17 → size 289 > 256
+    [66049, 257], // ReShade 高さ257 → size 257 > 256
+  ])("%i×%i → null", (w, h) => {
+    expect(detectImageLutLayout(w, h)).toBeNull();
+  });
+  it.each([
+    [4096, 4096], // Hald L=16 → size 256（上限境界は受理）
+    [65536, 256], // ReShade 高さ256（上限境界は受理）
+  ])("%i×%i → 受理（上限境界）", (w, h) => {
+    expect(detectImageLutLayout(w, h)).not.toBeNull();
+  });
+});
+
 /** 量子化往復の期待値: 画素 = round(v*255)、読み戻し = 画素/255。 */
 function quantized(v: number): number {
   return Math.round(v * 255) / 255;
@@ -396,6 +411,39 @@ describe("IMP-26: PNG由来ベースLUTの8bit誤差を許容する", () => {
       }
     }
     expect(max).toBeLessThan(1 / 255 + 1e-4);
+  });
+});
+
+describe("IMP-44: 巨大な有限ドメインでも正規化できる", () => {
+  it("±1e308 のドメインで中間入力は原点色にならない", () => {
+    // 素朴な (c−min)/(max−min) は差分が Infinity になり u≡0 に潰れる。
+    // 半分尺度の正規化で u≈0.5 を保つことを確認する。
+    const base = imported(
+      createNeutralLut(4),
+      [-1e308, -1e308, -1e308],
+      [1e308, 1e308, 1e308],
+    );
+    const out = new Float32Array(3);
+    withBaseLut(
+      base,
+      (r, g, b, o) => {
+        o[0] = r;
+        o[1] = g;
+        o[2] = b;
+      },
+      1,
+    )(0.5, 0.5, 0.5, out);
+    expect(out[0]).toBeCloseTo(0.5, 2);
+    expect(out[1]).toBeCloseTo(0.5, 2);
+    expect(out[2]).toBeCloseTo(0.5, 2);
+  });
+});
+
+describe("IMP-45: データ行は LUT_3D_SIZE の後に限る", () => {
+  it("先頭にデータ行があると行番号付きエラー", () => {
+    const lines = MINIMAL_CUBE.split("\n");
+    const reordered = [lines[1], lines[0], ...lines.slice(2)].join("\n");
+    expect(() => parseCubeLut(reordered)).toThrow(/データ行より前/);
   });
 });
 

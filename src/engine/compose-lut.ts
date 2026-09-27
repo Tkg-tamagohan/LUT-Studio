@@ -32,21 +32,29 @@ export function withBaseLut(
 ): ColorTransform {
   if (base === null || strength <= 0) return next;
   const { lut, domainMin, domainMax } = base;
+  // 端点が有限でも差分は無限大に溢れ得るため（±1e308 等）、端点を半分に
+  // してから正規化する。2で割るのは指数部の減算だけで精度を失わない。
+  const lo: [number, number, number] = [
+    domainMin[0] / 2,
+    domainMin[1] / 2,
+    domainMin[2] / 2,
+  ];
+  const hi: [number, number, number] = [
+    domainMax[0] / 2,
+    domainMax[1] / 2,
+    domainMax[2] / 2,
+  ];
+  const norm = (c: number, i: 0 | 1 | 2) =>
+    clamp01((c / 2 - lo[i]) / (hi[i] - lo[i]));
   const tmp = new Float32Array(3);
   if (strength >= 1) {
     return (r, g, b, out) => {
-      const ur = clamp01((r - domainMin[0]) / (domainMax[0] - domainMin[0]));
-      const ug = clamp01((g - domainMin[1]) / (domainMax[1] - domainMin[1]));
-      const ub = clamp01((b - domainMin[2]) / (domainMax[2] - domainMin[2]));
-      sampleLutTrilinear(lut, ur, ug, ub, tmp);
+      sampleLutTrilinear(lut, norm(r, 0), norm(g, 1), norm(b, 2), tmp);
       next(tmp[0], tmp[1], tmp[2], out);
     };
   }
   return (r, g, b, out) => {
-    const ur = clamp01((r - domainMin[0]) / (domainMax[0] - domainMin[0]));
-    const ug = clamp01((g - domainMin[1]) / (domainMax[1] - domainMin[1]));
-    const ub = clamp01((b - domainMin[2]) / (domainMax[2] - domainMin[2]));
-    sampleLutTrilinear(lut, ur, ug, ub, tmp);
+    sampleLutTrilinear(lut, norm(r, 0), norm(g, 1), norm(b, 2), tmp);
     // 未適用側はドメイン正規化前の元入力に対する補間（0% で画像を素通しにするため）
     next(
       r + strength * (tmp[0] - r),

@@ -270,6 +270,8 @@ function setBaseLut(imported: ImportedLut, fileName: string): void {
 function clearBaseLut(): void {
   baseLut = null;
   baseLutLabel = null;
+  // 解除より前に開始した読み込みが完了後に再適用されないよう世代を進める
+  lutLoadGeneration++;
   scheduleRebake();
   rebuildPanel();
   status.textContent = "ベースLUTを解除しました";
@@ -295,14 +297,25 @@ async function decodeToRgba(file: File): Promise<RgbaImage> {
 }
 
 /**
+ * 読み込み処理の世代番号。デコード待ちの古い読み込みが、後から選んだファイルや
+ * 解除操作を完了時に上書きしないよう、完了時に最新世代だけを適用する。
+ */
+let lutLoadGeneration = 0;
+
+/**
  * `.cube` またはPNG画像LUTをベースLUTとして読み込む（仕様決定R・T）。
  * エラー時はメッセージを表示し、現在のベースLUTは維持する。
  */
 async function loadBaseLutFile(file: File): Promise<void> {
+  const gen = ++lutLoadGeneration;
+  // 新しい読み込みや解除が先に行われていたら、この結果もエラーも捨てる
+  const stale = () => gen !== lutLoadGeneration;
   try {
     const lower = file.name.toLowerCase();
     if (lower.endsWith(".cube")) {
-      setBaseLut(parseCubeLut(await file.text()), file.name);
+      const imported = parseCubeLut(await file.text());
+      if (stale()) return;
+      setBaseLut(imported, file.name);
       return;
     }
     if (lower.endsWith(".png") || file.type === "image/png") {
@@ -312,6 +325,7 @@ async function loadBaseLutFile(file: File): Promise<void> {
       } catch {
         throw new Error("PNGのデコードに失敗しました");
       }
+      if (stale()) return;
       const layout = detectImageLutLayout(img.width, img.height);
       if (layout === null) {
         throw new Error(
@@ -330,6 +344,7 @@ async function loadBaseLutFile(file: File): Promise<void> {
     }
     throw new Error("対応していない形式です（.cube またはPNG画像LUTのみ）");
   } catch (e) {
+    if (stale()) return;
     status.textContent = `LUTの読み込みに失敗: ${
       e instanceof Error ? e.message : String(e)
     }`;
