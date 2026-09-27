@@ -4,12 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LUT-Studio</title>
+    <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <main id="app">
+    <header id="app-header">
       <h1>LUT-Studio</h1>
-      <p>ゲームのスクリーンショット用LUT作成ツール（開発中）</p>
-    </main>
+      <p id="status">画像を読み込んでください</p>
+    </header>
+    <div id="main">
+      <section id="stage">
+        <div id="dropzone">
+          <p>画像をドラッグ＆ドロップ</p>
+          <button id="open" type="button">画像を選択…</button>
+          <input id="file-input" type="file" accept="image/*" multiple hidden />
+        </div>
+        <div id="grid"></div>
+      </section>
+      <aside id="panel"></aside>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

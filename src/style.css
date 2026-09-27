@@ -1,0 +1,139 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  background: #1a1a1e;
+  color: #e8e8ec;
+}
+
+#app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #333;
+}
+
+#app-header h1 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+#status {
+  margin: 0;
+  color: #9a9aa5;
+  font-size: 0.85rem;
+}
+
+#main {
+  display: flex;
+  height: calc(100vh - 3rem);
+}
+
+#stage {
+  flex: 1;
+  padding: 1rem;
+  overflow: auto;
+}
+
+#dropzone {
+  border: 2px dashed #555;
+  border-radius: 8px;
+  padding: 1.5rem;
+  text-align: center;
+  color: #9a9aa5;
+  margin-bottom: 1rem;
+}
+
+#dropzone.dragging {
+  border-color: #6ab0ff;
+  color: #6ab0ff;
+}
+
+#dropzone p {
+  margin: 0 0 0.5rem;
+}
+
+#grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.preview-card {
+  margin: 0;
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.preview-canvas {
+  display: block;
+  width: 320px;
+  max-width: 100%;
+  background: #000;
+  border-radius: 4px;
+}
+
+.preview-card figcaption {
+  font-size: 0.75rem;
+  color: #9a9aa5;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#panel {
+  width: 280px;
+  flex: 0 0 280px;
+  border-left: 1px solid #333;
+  padding: 1rem;
+  overflow: auto;
+}
+
+#panel h2 {
+  font-size: 0.95rem;
+  margin: 0 0 1rem;
+}
+
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.25rem;
+  margin-bottom: 0.9rem;
+}
+
+.slider-label {
+  font-size: 0.8rem;
+  color: #c0c0c8;
+}
+
+.slider-value {
+  font-size: 0.75rem;
+  color: #9a9aa5;
+  text-align: right;
+}
+
+.slider-row input[type="range"] {
+  width: 100%;
+}
+
+button {
+  background: #2c2c34;
+  color: #e8e8ec;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #3a3a44;
+}
