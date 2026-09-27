@@ -316,10 +316,22 @@ function addLggControls(
   const summary = document.createElement("summary");
   summary.textContent = "リフト・ガンマ・ゲイン";
   details.appendChild(summary);
-  details.open =
-    lggDetailsOpen ?? !window.matchMedia("(max-width: 640px)").matches;
+  const mq = window.matchMedia("(max-width: 640px)");
+  details.open = lggDetailsOpen ?? !mq.matches;
+  // 自動追従によるopen変更でもtoggleは発火するので、記録をスキップする目印
+  let autoToggle = false;
   details.addEventListener("toggle", () => {
+    if (autoToggle) {
+      autoToggle = false;
+      return;
+    }
     lggDetailsOpen = details.open;
+  });
+  // ユーザーが一度も開閉していない間は、画面幅が640pxを跨いだら既定に追従する
+  mq.addEventListener("change", () => {
+    if (lggDetailsOpen !== null) return;
+    autoToggle = true;
+    details.open = !mq.matches;
   });
   container.appendChild(details);
 
@@ -432,7 +444,10 @@ export function createAdjustmentPanel(
   onPickStart?: PickFromImage,
   actions?: PanelActions,
 ): () => void {
+  // カーブエディタが登録したResizeObserver。再構築で古いDOMを捨てる前に解除する
+  let curveObserver: ResizeObserver | null = null;
   const rebuildPanel = () => {
+    curveObserver?.disconnect();
     container.replaceChildren();
     createAdjustmentPanel(container, adj, onChange, onPickStart, actions);
   };
@@ -458,7 +473,7 @@ export function createAdjustmentPanel(
 
   addLggControls(container, adj, onChange);
 
-  createCurveEditor(container, adj, onChange);
+  curveObserver = createCurveEditor(container, adj, onChange);
 
   addIsolationControls(container, adj, onChange, rebuildPanel, onPickStart);
 

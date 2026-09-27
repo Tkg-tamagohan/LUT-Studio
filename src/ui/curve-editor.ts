@@ -34,7 +34,7 @@ export function createCurveEditor(
   container: HTMLElement,
   adj: AdjustmentSet,
   onChange: () => void,
-): void {
+): ResizeObserver {
   // スマホではパネルのスクロール操作がキャンバスに吸われてカーブが
   // 意図せず変わるため、detailsで格納する。既定はスマホで畳み、
   // デスクトップで展開。一度操作したらその状態を維持する。
@@ -43,10 +43,22 @@ export function createCurveEditor(
   const summary = document.createElement("summary");
   summary.textContent = "RGBカーブ";
   details.appendChild(summary);
-  details.open =
-    curveDetailsOpen ?? !window.matchMedia("(max-width: 640px)").matches;
+  const mq = window.matchMedia("(max-width: 640px)");
+  details.open = curveDetailsOpen ?? !mq.matches;
+  // 自動追従によるopen変更でもtoggleは発火するので、記録をスキップする目印
+  let autoToggle = false;
   details.addEventListener("toggle", () => {
+    if (autoToggle) {
+      autoToggle = false;
+      return;
+    }
     curveDetailsOpen = details.open;
+  });
+  // ユーザーが一度も開閉していない間は、画面幅が640pxを跨いだら既定に追従する
+  mq.addEventListener("change", () => {
+    if (curveDetailsOpen !== null) return;
+    autoToggle = true;
+    details.open = !mq.matches;
   });
   container.appendChild(details);
 
@@ -276,4 +288,7 @@ export function createCurveEditor(
   resizeObserver.observe(canvas);
 
   draw();
+
+  // パネル再構築時に呼び出し側でdisconnect()して監視を止められるよう返す
+  return resizeObserver;
 }
