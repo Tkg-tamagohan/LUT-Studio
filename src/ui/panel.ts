@@ -10,6 +10,17 @@ import { createCurveEditor } from "./curve-editor";
 /** 画像上のクリックで色相を拾いたい時に呼ぶ。結果は色相（度）で返る。 */
 type PickFromImage = (onPicked: (hueDeg: number) => void) => void;
 
+/** 書き出すLUTの形式（仕様決定A・J）。 */
+export type LutExportFormat = "cube" | "hald" | "reshade";
+
+/** パネルから呼び出す書き出し・プリセット操作。実体は main.ts が持つ。 */
+export interface PanelActions {
+  exportLut(format: LutExportFormat): void;
+  exportImages(): void;
+  savePreset(): void;
+  loadPreset(file: File): void;
+}
+
 /**
  * 調整パネル。スライダ操作で AdjustmentSet を直接書き換え、
  * 変更のたびに onChange を呼ぶ（呼び出し側でLUT再焼き付けを行う）。
@@ -315,15 +326,86 @@ function addLggControls(
   }
 }
 
+/** LUT書き出しと画像書き出しの操作列（仕様決定A・G・J）。 */
+function addExportControls(
+  container: HTMLElement,
+  actions: PanelActions,
+): void {
+  const heading = document.createElement("h3");
+  heading.textContent = "書き出し";
+  container.appendChild(heading);
+
+  const row = document.createElement("div");
+  row.className = "export-row";
+  const format = document.createElement("select");
+  for (const [value, label] of [
+    ["cube", ".cube"],
+    ["hald", "PNG (HaldCLUT)"],
+    ["reshade", "PNG (ReShade)"],
+  ] as const) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    format.appendChild(option);
+  }
+  const lutButton = document.createElement("button");
+  lutButton.type = "button";
+  lutButton.textContent = "LUTを書き出し";
+  lutButton.addEventListener("click", () =>
+    actions.exportLut(format.value as LutExportFormat),
+  );
+  row.append(format, lutButton);
+  container.appendChild(row);
+
+  const imgButton = document.createElement("button");
+  imgButton.type = "button";
+  imgButton.textContent = "適用済み画像をすべてPNG書き出し";
+  imgButton.addEventListener("click", () => actions.exportImages());
+  container.appendChild(imgButton);
+}
+
+/** JSONプリセットの保存・読み込み（仕様決定E）。 */
+function addPresetControls(
+  container: HTMLElement,
+  actions: PanelActions,
+): void {
+  const heading = document.createElement("h3");
+  heading.textContent = "プリセット";
+  container.appendChild(heading);
+
+  const row = document.createElement("div");
+  row.className = "export-row";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = "JSONで保存";
+  save.addEventListener("click", () => actions.savePreset());
+  const load = document.createElement("button");
+  load.type = "button";
+  load.textContent = "JSONから読込…";
+
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.hidden = true;
+  input.addEventListener("change", () => {
+    if (input.files?.[0]) actions.loadPreset(input.files[0]);
+    input.value = "";
+  });
+  load.addEventListener("click", () => input.click());
+  row.append(save, load, input);
+  container.appendChild(row);
+}
+
 export function createAdjustmentPanel(
   container: HTMLElement,
   adj: AdjustmentSet,
   onChange: () => void,
   onPickStart?: PickFromImage,
-): void {
+  actions?: PanelActions,
+): () => void {
   const rebuildPanel = () => {
     container.replaceChildren();
-    createAdjustmentPanel(container, adj, onChange, onPickStart);
+    createAdjustmentPanel(container, adj, onChange, onPickStart, actions);
   };
 
   const title = document.createElement("h2");
@@ -350,6 +432,11 @@ export function createAdjustmentPanel(
 
   addIsolationControls(container, adj, onChange, rebuildPanel, onPickStart);
 
+  if (actions) {
+    addExportControls(container, actions);
+    addPresetControls(container, actions);
+  }
+
   const reset = document.createElement("button");
   reset.type = "button";
   reset.textContent = "リセット";
@@ -371,4 +458,12 @@ export function createAdjustmentPanel(
     onChange();
   });
   container.appendChild(reset);
+
+  const hint = document.createElement("p");
+  hint.className = "hint";
+  hint.textContent = "プレビュー画像を押している間は原画を表示します";
+  container.appendChild(hint);
+
+  // プリセット読み込み後など、外部からパネル表示を最新状態へ戻すために返す
+  return rebuildPanel;
 }

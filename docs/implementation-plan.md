@@ -58,9 +58,9 @@
 
 ### Phase 4: 書き出しとプリセット
 
-- [ ] LUT書き出しUI（`.cube` とPNG。PNGはHaldCLUT／ReShadeを選択式）
-- [ ] LUT適用済み画像のPNG書き出し
-- [ ] JSONプリセットの保存・読み込み
+- [x] LUT書き出しUI（`.cube` とPNG。PNGはHaldCLUT／ReShadeを選択式）
+- [x] LUT適用済み画像のPNG書き出し
+- [x] JSONプリセットの保存・読み込み
 
 受け入れ条件：要件定義書のF1からF7までがすべて動作する。
 
