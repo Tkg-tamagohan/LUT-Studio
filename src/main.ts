@@ -22,7 +22,12 @@ import {
   createAdjustmentPanel,
   type LutExportFormat,
 } from "./ui/panel";
-import { canvasToPngBlob, downloadBlob, rgbaToPngBlob } from "./ui/export";
+import {
+  canvasToPngBlob,
+  downloadBlob,
+  rgbaToPngBlob,
+  uniqueImageExportName,
+} from "./ui/export";
 
 /** プレビュー用LUTのサイズ。書き出しPNGアトラスと同じ64（仕様決定D）。 */
 const PREVIEW_LUT_SIZE = 64;
@@ -101,22 +106,38 @@ function exportLutFile(format: LutExportFormat): void {
   void exportPngLut(format);
 }
 
+/** 書き出し済みの画像ファイル名。同名画像があっても出力名が衝突しないよう管理する。 */
+const exportedImageNames = new Set<string>();
+
 /** LUTを適用した画像を元ファイルの解像度でPNG化して保存する（仕様決定G）。 */
-async function exportImage(entry: ImageEntry, exportLut: LutData): Promise<void> {
+async function exportImage(
+  entry: ImageEntry,
+  exportLut: LutData,
+): Promise<string> {
   // プレビュー用に縮小済みのbitmapではなく、元ファイルからフル解像度で再デコードする
   const bitmap = await createImageBitmap(entry.file);
+  const width = bitmap.width;
+  const height = bitmap.height;
   try {
     const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) throw new Error("canvasコンテキストを取得できません");
     ctx.drawImage(bitmap, 0, 0);
-    const pixels = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
-    applyLutToRgba(exportLut, pixels.data);
-    ctx.putImageData(pixels, 0, 0);
+    bitmap.close();
+    {
+      const pixels = ctx.getImageData(0, 0, width, height);
+      applyLutToRgba(exportLut, pixels.data);
+      ctx.putImageData(pixels, 0, 0);
+    }
     const blob = await canvasToPngBlob(canvas);
-    downloadBlob(blob, `${baseName(entry.name)}-lut.png`);
+    // エンコード済みのcanvasバッファはすぐ手放し、一括書き出し時のピークを抑える
+    canvas.width = 0;
+    canvas.height = 0;
+    const filename = uniqueImageExportName(baseName(entry.name), exportedImageNames);
+    downloadBlob(blob, filename);
+    return filename;
   } finally {
     bitmap.close();
   }
@@ -209,8 +230,8 @@ function addImage(entry: ImageEntry): void {
   exportButton.addEventListener("click", () => {
     status.textContent = `${entry.name} を書き出し中…`;
     void exportImage(entry, bakeExportLut(IMAGE_LUT_SIZE))
-      .then(() => {
-        status.textContent = `書き出しました: ${baseName(entry.name)}-lut.png`;
+      .then((filename) => {
+        status.textContent = `書き出しました: ${filename}`;
       })
       .catch(() => {
         status.textContent = `書き出しに失敗しました: ${entry.name}`;

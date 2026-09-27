@@ -14,6 +14,20 @@ export function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
+/**
+ * 画像書き出し用の出力名を `<base>-lut.png` 形式で返す。
+ * 同じベース名が繰り返されたときは `<base>-lut-2.png` …と連番で衝突を避ける。
+ * `used` は呼び出し側が保持する使用済み名の集合で、返した名前を登録する。
+ */
+export function uniqueImageExportName(base: string, used: Set<string>): string {
+  let name = `${base}-lut.png`;
+  for (let i = 2; used.has(name); i++) {
+    name = `${base}-lut-${i}.png`;
+  }
+  used.add(name);
+  return name;
+}
+
 /** エンジンが生成したRGBA8バッファをPNGのBlobへエンコードする。 */
 export function rgbaToPngBlob(img: RgbaImage): Promise<Blob> {
   const canvas = document.createElement("canvas");
