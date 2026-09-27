@@ -28,11 +28,11 @@
 
 ### Phase 1: プロジェクト基盤とLUTエンジン
 
-- [ ] Vite + TypeScript + Vitest のスキャフォールド
-- [ ] lintとtestのCI、GitHub Pagesへのデプロイ用Workflow
-- [ ] 中立LUT生成（33³）と `.cube` 書き出し
-- [ ] PNGアトラス書き出し（64³。HaldCLUTとReShadeの両配置形式）
-- [ ] 調整パイプラインの型定義と、中立LUTへ適用したとき恒等になることのテスト
+- [x] Vite + TypeScript + Vitest のスキャフォールド
+- [x] lintとtestのCI、GitHub Pagesへのデプロイ用Workflow
+- [x] 中立LUT生成（33³）と `.cube` 書き出し
+- [x] PNGアトラス書き出し（64³。HaldCLUTとReShadeの両配置形式）
+- [x] 調整パイプラインの型定義と、中立LUTへ適用したとき恒等になることのテスト
 
 受け入れ条件：生成した `.cube` が仕様どおりの形式で出力され、engineのテストがパスする。
 
