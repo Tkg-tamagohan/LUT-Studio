@@ -564,11 +564,11 @@ const applyTileSize = (pct: number) => {
   renderAll();
 };
 const savedTile = Number(localStorage.getItem(TILE_KEY));
-if (savedTile >= 15 && savedTile <= 90) {
+if (savedTile >= 15 && savedTile <= 100) {
   tileSize.value = String(savedTile);
 } else if (window.matchMedia("(max-width: 640px)").matches) {
-  // スマホ版では1枚ずつ大きく見る用途を優先し、既定を最大(90%)とする
-  tileSize.value = "90";
+  // スマホ版では1枚ずつ大きく見る用途を優先し、既定をスライダーの最大とする
+  tileSize.value = tileSize.max;
 }
 applyTileSize(Number(tileSize.value));
 tileSize.addEventListener("input", () => {

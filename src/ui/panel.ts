@@ -191,7 +191,7 @@ function addIsolationControls(
   enabledRow.append(enabled, enabledText);
   container.appendChild(enabledRow);
 
-  // 適用位置の選択（仕様決定Y）。先頭＝ベースLUT直後、末尾＝LGG適用後
+  // 適用位置の選択（仕様決定Z）。先頭＝ベースLUT直後、末尾＝LGG適用後
   const posRow = document.createElement("div");
   posRow.className = "export-row";
   const posLabel = document.createElement("span");

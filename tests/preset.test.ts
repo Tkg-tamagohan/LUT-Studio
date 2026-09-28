@@ -98,7 +98,7 @@ describe("PRESET-02 不正なプリセットを拒否する", () => {
   });
 });
 
-describe("PRESET-04 旧プリセットとの後方互換（仕様決定Y）", () => {
+describe("PRESET-04 旧プリセットとの後方互換（仕様決定Z）", () => {
   it("isolation.position を持たない旧形式は \"last\" として読み込む", () => {
     const adj = dirtyAdjustments() as unknown as Record<string, unknown>;
     delete (adj.isolation as Record<string, unknown>).position;
