@@ -257,6 +257,7 @@ describe("ISO-01 分離（部分色残し）", () => {
       enabled: true,
       strength: 1,
       targets: [{ hue: 0, range: 30, feather: 10 }],
+      position: "last",
     };
     return adj;
   };
@@ -307,6 +308,7 @@ describe("ISO-02 複数色相の選択", () => {
         { hue: 0, range: 30, feather: 10 },
         { hue: 240, range: 30, feather: 10 },
       ],
+      position: "last",
     };
     const out = new Float32Array(3);
     // 赤と青は残る
@@ -328,6 +330,7 @@ describe("ISO-03 選択範囲のマスクプレビュー", () => {
       enabled: true,
       strength: 1,
       targets: [{ hue: 0, range: 30, feather: 10 }],
+      position: "last",
     };
     const maskTransform = compileAdjustments(adj, { maskPreview: true });
     const out = new Float32Array(3);
@@ -345,11 +348,86 @@ describe("ISO-03 選択範囲のマスクプレビュー", () => {
       enabled: true,
       strength: 1,
       targets: [{ hue: 0, range: 30, feather: 10 }],
+      position: "last",
     };
     const maskTransform = compileAdjustments(adj, { maskPreview: true });
     const out = new Float32Array(3);
     maskTransform(0.5, 0.5, 0.5, out);
     expect(out[0]).toBeCloseTo(0, 5);
+  });
+});
+
+describe("ISO-04 適用位置（仕様決定Y）", () => {
+  // 位置ごとの適用順を値で区別するため、マスクの評価対象が変わる
+  // 色相回転（first では回転前の色相、last では回転後の色相で選択される）と、
+  // 脱色後の色に別の調整がかかるか（色温度のシフトが残るか）を見る。
+  const isolateGreen = (position: "first" | "last") => {
+    const adj = neutralAdjustments();
+    adj.isolation = {
+      enabled: true,
+      strength: 1,
+      targets: [{ hue: 120, range: 30, feather: 10 }],
+      position,
+    };
+    return adj;
+  };
+
+  it("first は入力色・last は調整後の色で選択する（色相回転で区別）", () => {
+    const out = new Float32Array(3);
+    // 緑入力を色相-120°で赤に回す調整
+    const first = isolateGreen("first");
+    first.hue = -120;
+    applyAdjustments(0, 1, 0, first, out);
+    // first: 回転前の緑で選択 → 彩色が残り、その後の回転で赤になる
+    expect(out[0]).toBeCloseTo(1, 4);
+    expect(out[1]).toBeCloseTo(0, 4);
+    expect(out[2]).toBeCloseTo(0, 4);
+
+    const last = isolateGreen("last");
+    last.hue = -120;
+    applyAdjustments(0, 1, 0, last, out);
+    // last: 回転後の赤で選択 → 緑ターゲットに合わず脱色される
+    expect(out[0]).toBeCloseTo(out[1], 5);
+    expect(out[1]).toBeCloseTo(out[2], 5);
+    expect(out[0]).toBeCloseTo(0.2126, 4);
+  });
+
+  it("first は脱色結果に後続の調整がかかり、last は脱色が最終出力になる", () => {
+    const out = new Float32Array(3);
+    // 赤入力を緑ターゲットで脱色し、色温度を暖色方向に振る調整
+    const first = isolateGreen("first");
+    first.temperature = 1;
+    applyAdjustments(1, 0, 0, first, out);
+    // first: 先に脱色した輝度へ色温度シフトがかかる（R+・B-の着色が残る）
+    expect(out[0]).toBeGreaterThan(out[1]);
+    expect(out[1]).toBeGreaterThan(out[2]);
+
+    const last = isolateGreen("last");
+    last.temperature = 1;
+    applyAdjustments(1, 0, 0, last, out);
+    // last: 調整後の色で選択して脱色 → 出力は着色されない輝度になる
+    expect(out[0]).toBeCloseTo(out[1], 5);
+    expect(out[1]).toBeCloseTo(out[2], 5);
+  });
+
+  it("マスクプレビューも位置に従い、選択位置の画素の選択度を返す", () => {
+    const out = new Float32Array(3);
+    // 緑入力を赤に回す調整で、先頭と末尾でマスクが逆になる
+    const first = isolateGreen("first");
+    first.hue = -120;
+    const firstMask = compileAdjustments(first, { maskPreview: true });
+    firstMask(0, 1, 0, out);
+    // first: 入力の緑を評価 → 選択範囲内で白
+    expect(out[0]).toBeCloseTo(1, 5);
+
+    const last = isolateGreen("last");
+    last.hue = -120;
+    const lastMask = compileAdjustments(last, { maskPreview: true });
+    lastMask(0, 1, 0, out);
+    // last: 回転後の赤を評価 → 選択範囲外で黒
+    expect(out[0]).toBeCloseTo(0, 5);
+    expect(out[1]).toBeCloseTo(0, 5);
+    expect(out[2]).toBeCloseTo(0, 5);
   });
 });
 

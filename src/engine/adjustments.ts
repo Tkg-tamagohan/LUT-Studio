@@ -51,6 +51,15 @@ export interface IsolationTarget {
 }
 
 /**
+ * 色相アイソレーションの適用位置（仕様決定Y）。
+ * "first": 調整チェーンの最初（ベースLUT直後）。原画像の色相で選択し、
+ *         脱色後の色に対して残りの調整がかかる。
+ * "last":  調整チェーンの最後（LGG適用後）。調整済みの色で選択し、
+ *         脱色が最終出力になる。
+ */
+export type IsolationPosition = "first" | "last";
+
+/**
  * 色相アイソレーションの設定。選択した色相範囲（複数可）の彩色だけを残し、
  * それ以外を輝度へ脱色する「部分色残し」。
  */
@@ -61,6 +70,8 @@ export interface IsolationParams {
   strength: number;
   /** 残したい色相の選択一覧。複数登録できる（肌色＋別の特定色など）。 */
   targets: IsolationTarget[];
+  /** 調整チェーン内の適用位置。 */
+  position: IsolationPosition;
 }
 
 export function neutralAdjustments(): AdjustmentSet {
@@ -81,6 +92,7 @@ export function neutralAdjustments(): AdjustmentSet {
       enabled: false,
       strength: 1,
       targets: [{ hue: 0, range: 30, feather: 15 }],
+      position: "last",
     },
   };
 }
@@ -183,7 +195,9 @@ function lookupCurve(table: CurveTable | null, x: number): number {
  * 調整一式を変換関数へコンパイルする。LUT焼き付けでは格子点ごとに呼ぶため、
  * カーブの引き表をここで一度だけ構築する（1画素ごとのソートを避ける）。
  * 適用順は 露出 → 色温度 → コントラスト → 彩度 → 色相 → カーブ →
- * リフト/ガンマ/ゲイン とし、最後に0〜1へ丸める。
+ * リフト/ガンマ/ゲイン とし、最後に0〜1へ丸める（仕様決定X）。
+ * アイソレーションは position が "first" なら露出の前（チェーン先頭）、
+ * "last" ならリフト/ガンマ/ゲインの後（チェーン末尾）に適用する（仕様決定Y）。
  */
 export interface CompileOptions {
   /**
@@ -209,7 +223,54 @@ export function compileAdjustments(
   const tableG = buildCurveTable(adj.curveG);
   const tableB = buildCurveTable(adj.curveB);
 
+  const iso = adj.isolation;
+  /** アイソレーション結果の受け皿。位置に依らず同じ処理を使い回す。 */
+  const isoOut = new Float32Array(3);
+  /**
+   * r,g,b にアイソレーションを適用して isoOut に書く。
+   * maskPreview 指定時は脱色ではなく選択度（グレースケール）を書く。
+   */
+  const runIsolation = (r: number, g: number, b: number): void => {
+    const h = hueDegrees(r, g, b);
+    // 無彩色は色相を持たないため、どの選択対象にも含めない
+    const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+    let mask = 0;
+    if (chroma > 1e-3) {
+      // 複数の選択対象のうち最も強く選択される度合いを採用する
+      for (const t of iso.targets) {
+        const m = isolationMaskAt(t, h);
+        if (m > mask) mask = m;
+      }
+    }
+    if (opts?.maskPreview) {
+      isoOut[0] = mask;
+      isoOut[1] = mask;
+      isoOut[2] = mask;
+      return;
+    }
+    const lumaI = r * LUMA_R + g * LUMA_G + b * LUMA_B;
+    // mask=1 は原色、mask=0 は strength に応じて脱色
+    const keep = mask + (1 - mask) * (1 - iso.strength);
+    isoOut[0] = lumaI + (r - lumaI) * keep;
+    isoOut[1] = lumaI + (g - lumaI) * keep;
+    isoOut[2] = lumaI + (b - lumaI) * keep;
+  };
+
   return (r, g, b, out) => {
+    // 位置 "first": 調整チェーンの先頭（ベースLUT直後）に適用する
+    if (iso.enabled && iso.position === "first") {
+      runIsolation(r, g, b);
+      if (opts?.maskPreview) {
+        out[0] = isoOut[0];
+        out[1] = isoOut[1];
+        out[2] = isoOut[2];
+        return;
+      }
+      r = isoOut[0];
+      g = isoOut[1];
+      b = isoOut[2];
+    }
+
     r *= exp;
     g *= exp;
     b *= exp;
@@ -241,33 +302,6 @@ export function compileAdjustments(
       b = nb;
     }
 
-    const iso = adj.isolation;
-    if (iso.enabled) {
-      const h = hueDegrees(r, g, b);
-      // 無彩色は色相を持たないため、どの選択対象にも含めない
-      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
-      let mask = 0;
-      if (chroma > 1e-3) {
-        // 複数の選択対象のうち最も強く選択される度合いを採用する
-        for (const t of iso.targets) {
-          const m = isolationMaskAt(t, h);
-          if (m > mask) mask = m;
-        }
-      }
-      if (opts?.maskPreview) {
-        out[0] = mask;
-        out[1] = mask;
-        out[2] = mask;
-        return;
-      }
-      const lumaI = r * LUMA_R + g * LUMA_G + b * LUMA_B;
-      // mask=1 は原色、mask=0 は strength に応じて脱色
-      const keep = mask + (1 - mask) * (1 - iso.strength);
-      r = lumaI + (r - lumaI) * keep;
-      g = lumaI + (g - lumaI) * keep;
-      b = lumaI + (b - lumaI) * keep;
-    }
-
     r = lookupCurve(tableR, lookupCurve(tableMaster, r));
     g = lookupCurve(tableG, lookupCurve(tableMaster, g));
     b = lookupCurve(tableB, lookupCurve(tableMaster, b));
@@ -275,6 +309,14 @@ export function compileAdjustments(
     out[0] = applyLgg(r, adj.lift[0], adj.gamma[0], adj.gain[0]);
     out[1] = applyLgg(g, adj.lift[1], adj.gamma[1], adj.gain[1]);
     out[2] = applyLgg(b, adj.lift[2], adj.gamma[2], adj.gain[2]);
+
+    // 位置 "last": LGG適用後（チェーン末尾）に適用する
+    if (iso.enabled && iso.position === "last") {
+      runIsolation(out[0], out[1], out[2]);
+      out[0] = isoOut[0];
+      out[1] = isoOut[1];
+      out[2] = isoOut[2];
+    }
   };
 }
 

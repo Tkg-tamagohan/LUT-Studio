@@ -33,6 +33,7 @@ function dirtyAdjustments() {
       { hue: 20, range: 40, feather: 10 },
       { hue: 200, range: 25, feather: 20 },
     ],
+    position: "first",
   };
   return adj;
 }
@@ -88,6 +89,21 @@ describe("PRESET-02 不正なプリセットを拒否する", () => {
     const adj = dirtyAdjustments() as unknown as Record<string, unknown>;
     adj.isolation = { enabled: true, strength: 1, targets: [{ hue: "赤" }] };
     expect(() => presetFromJson(JSON.stringify(adj))).toThrow(/targets/);
+  });
+
+  it("isolation.position が \"first\" / \"last\" 以外だとエラー", () => {
+    const adj = dirtyAdjustments() as unknown as Record<string, unknown>;
+    (adj.isolation as Record<string, unknown>).position = "middle";
+    expect(() => presetFromJson(JSON.stringify(adj))).toThrow(/position/);
+  });
+});
+
+describe("PRESET-04 旧プリセットとの後方互換（仕様決定Y）", () => {
+  it("isolation.position を持たない旧形式は \"last\" として読み込む", () => {
+    const adj = dirtyAdjustments() as unknown as Record<string, unknown>;
+    delete (adj.isolation as Record<string, unknown>).position;
+    const restored = presetFromJson(JSON.stringify(adj));
+    expect(restored.isolation.position).toBe("last");
   });
 });
 
