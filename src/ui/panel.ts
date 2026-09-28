@@ -3,6 +3,7 @@ import {
   IDENTITY_CURVE,
   isolationMaskAt,
   type AdjustmentSet,
+  type IsolationPosition,
   type IsolationTarget,
 } from "../engine";
 import { createCurveEditor } from "./curve-editor";
@@ -189,6 +190,29 @@ function addIsolationControls(
   enabledText.textContent = "有効（選択した色相だけ彩色を残す）";
   enabledRow.append(enabled, enabledText);
   container.appendChild(enabledRow);
+
+  // 適用位置の選択（仕様決定Z）。先頭＝ベースLUT直後、末尾＝LGG適用後
+  const posRow = document.createElement("div");
+  posRow.className = "export-row";
+  const posLabel = document.createElement("span");
+  posLabel.textContent = "適用位置";
+  const posSelect = document.createElement("select");
+  for (const [value, label] of [
+    ["last", "調整の最後（LGG適用後）"],
+    ["first", "調整の最初（ベースLUT直後）"],
+  ] as const) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    posSelect.appendChild(option);
+  }
+  posSelect.value = adj.isolation.position;
+  posSelect.addEventListener("change", () => {
+    adj.isolation.position = posSelect.value as IsolationPosition;
+    onChange();
+  });
+  posRow.append(posLabel, posSelect);
+  container.appendChild(posRow);
 
   // グラデーションバーの再描画関数を集め、どのスライダを動かしても全部更新する
   const refreshers: (() => void)[] = [];
@@ -588,6 +612,7 @@ export function createAdjustmentPanel(
         enabled: false,
         strength: 1,
         targets: [newIsolationTarget()],
+        position: "last",
       };
       rebuildPanel();
       onChange();

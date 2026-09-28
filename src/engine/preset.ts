@@ -1,6 +1,7 @@
 import type {
   AdjustmentSet,
   CurvePoint,
+  IsolationPosition,
   IsolationTarget,
 } from "./adjustments";
 
@@ -123,6 +124,17 @@ export function presetFromJson(text: string): AdjustmentSet {
   if (!Array.isArray(isoObj.targets) || isoObj.targets.length === 0) {
     fail("isolation.targets が1要素以上の配列ではありません");
   }
+  // isolation.position は後から追加されたフィールド（仕様決定Z）。
+  // フィールドを持たない旧プリセットは "last" として読み込む。
+  const pos = isoObj.position;
+  let position: IsolationPosition;
+  if (pos === undefined) {
+    position = "last";
+  } else if (pos === "first" || pos === "last") {
+    position = pos;
+  } else {
+    fail("isolation.position が \"first\" / \"last\" ではありません");
+  }
 
   return {
     exposure: readNumber(obj, "exposure", -3, 3),
@@ -141,6 +153,7 @@ export function presetFromJson(text: string): AdjustmentSet {
       enabled: isoObj.enabled,
       strength: readNumber(isoObj, "strength", 0, 1),
       targets: isoObj.targets.map((t, i) => readIsolationTarget(t, i)),
+      position,
     },
   };
 }
